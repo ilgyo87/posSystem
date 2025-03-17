@@ -4,10 +4,10 @@ import { useAuthenticator } from "@aws-amplify/ui-react-native"
 import { generateClient } from "aws-amplify/data"
 import { useNavigation } from "@react-navigation/native"
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack"
-import type { Schema } from "../amplify/data/resource"
 import type { RootStackParamList } from '../src/types';
 
-const client = generateClient<Schema>()
+// Create a client without type checking for production environment
+const client = generateClient() as any
 
 // Format phone number to E.164 format
 const formatPhoneNumber = (phone: string) => {
