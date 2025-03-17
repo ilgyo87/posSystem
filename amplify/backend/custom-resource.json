@@ -1,0 +1,10 @@
+{
+  "function": {
+    "setupNodeVersion": {
+      "build": true,
+      "providerPlugin": "awscloudformation",
+      "service": "customCloudformation",
+      "dependsOn": []
+    }
+  }
+}
