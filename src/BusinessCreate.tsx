@@ -1,7 +1,8 @@
 import React, { useState } from "react"
 import { View, Text, TextInput, Button, Alert, StyleSheet } from "react-native"
 import { useAuthenticator } from "@aws-amplify/ui-react-native"
-import { fetchAuthSession } from "aws-amplify/auth"
+import { generateClient } from "aws-amplify/api"
+import { type GraphQLResult } from '@aws-amplify/api-graphql'
 import { useNavigation } from "@react-navigation/native"
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack"
 import type { RootStackParamList } from '../src/types';
@@ -48,50 +49,44 @@ export default function BusinessCreate() {
     setIsCreating(true)
 
     try {
-      // Direct GraphQL mutation instead of using client.models
-      const createBusinessMutation = `mutation CreateBusiness($input: CreateBusinessInput!) {
-        createBusiness(input: $input) {
-          id
-          name
-          phoneNumber
-          location
+      // Use the Amplify GraphQL API
+      const createBusinessMutation = `
+        mutation CreateBusiness($name: String!, $phoneNumber: String!, $location: String) {
+          createBusiness(input: {name: $name, phoneNumber: $phoneNumber, location: $location}) {
+            id
+            name
+            phoneNumber
+            location
+          }
         }
-      }`;
+      `;
 
-      const variables = {
-        input: {
+      // Use the Amplify GraphQL client
+      const graphqlClient = generateClient();
+      
+      // Define the expected result type
+      interface CreateBusinessResult {
+        createBusiness: {
+          id: string;
+          name: string;
+          phoneNumber: string;
+          location?: string;
+        }
+      }
+      
+      // Execute the mutation with the client
+      const result = await graphqlClient.graphql({
+        query: createBusinessMutation,
+        variables: {
           name: businessName,
           phoneNumber: formattedPhone,
           location: location || null
         }
-      };
-
-      // Use the GraphQL API directly through fetch
-      const apiEndpoint = "https://o6ewbmbljfhm5jiyb4qsrphhdu.appsync-api.us-east-1.amazonaws.com/graphql";
-      
-      // Get the current authenticated user's token using Amplify Gen 2 approach
-      const { tokens } = await fetchAuthSession();
-      const token = tokens?.idToken?.toString() || '';
-      
-      const response = await fetch(apiEndpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': token
-        },
-        body: JSON.stringify({
-          query: createBusinessMutation,
-          variables: variables
-        })
-      });
-      
-      const result = await response.json();
+      }) as GraphQLResult<CreateBusinessResult>;
       
       setIsCreating(false);
       
-      if (result.errors) {
-        Alert.alert("Error creating business", JSON.stringify(result.errors));
-      } else if (!result.data || !result.data.createBusiness) {
+      if (!result.data || !result.data.createBusiness) {
         Alert.alert("Error", "Failed to create business: No data returned");
       } else {
         // Navigate to Dashboard with business info
