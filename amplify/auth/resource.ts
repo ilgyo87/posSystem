@@ -8,12 +8,7 @@ export const auth = defineAuth({
   loginWith: {
     email: true
   },
-  userAttributes: {
-    profilePicture: {
-      required: false,
-      mutable: true
-    }
-  },
+  // Remove custom user attributes for now to fix deployment error
   multifactor: {
     mode: "OPTIONAL",
     sms: true
