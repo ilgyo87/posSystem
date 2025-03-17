@@ -20,9 +20,20 @@ const defaultConfig = {
   aws_project_region: "us-east-1",
   aws_user_pools_id: "us-east-1_EFn32fp7l",
   aws_user_pools_web_client_id: "1uarskdusecvvgh9j1ha3e6bt8",
-  aws_appsync_graphqlEndpoint: "https://example.com/graphql",
+  aws_appsync_graphqlEndpoint: "https://o6ewbmbljfhm5jiyb4qsrphhdu.appsync-api.us-east-1.amazonaws.com/graphql",
   aws_appsync_region: "us-east-1",
-  aws_appsync_authenticationType: "AMAZON_COGNITO_USER_POOLS"
+  aws_appsync_authenticationType: "AMAZON_COGNITO_USER_POOLS",
+  // Add the specific model configuration for Gen 2
+  models: {
+    Business: {
+      name: "Business",
+      fields: {
+        id: { name: "id", isArray: false, type: "ID", required: true },
+        name: { name: "name", isArray: false, type: "String", required: true },
+        employees: { name: "employees", isArray: true, type: { model: "Employee" }, required: false }
+      }
+    }
+  }
 }
 
 // Use type assertion to avoid TypeScript errors
