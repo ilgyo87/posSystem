@@ -5,6 +5,23 @@ export type RootStackParamList = {
   Dashboard: { businessId?: string; businessName?: string };
   CustomerSelection: { businessId?: string; businessName?: string };
   ProductSelection: { businessId?: string; customerId?: string; customerName?: string };
+  Checkout: { 
+    businessId?: string; 
+    customerId?: string; 
+    customerName?: string; 
+    items: Array<{
+      id: string;
+      name: string;
+      price: number;
+      quantity: number;
+      type: 'service' | 'product';
+      serviceId?: string;
+      imageUrl?: string | null;
+    }>;
+    total: number;
+    pickupDate: string;
+    customerPreferences?: string;
+  };
   ServiceManagement: { businessId?: string };
   ProductManagement: { businessId?: string };
   EmployeeManagement: { businessId?: string };
@@ -13,4 +30,5 @@ export type RootStackParamList = {
   Customers: { businessId?: string };
   Reports: { businessId?: string };
   Settings: { businessId?: string };
+  DataExport: { businessId?: string };
 };

@@ -262,28 +262,27 @@ export default function ProductSelectionScreen({ route, navigation }: ProductSel
       return;
     }
     
-    // Navigate to checkout/order confirmation screen
-    Alert.alert(
-      'Proceed to Checkout',
-      `Total: $${calculateTotal().toFixed(2)}\nPickup Date: ${formatDate(pickupDate)}`,
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel'
-        },
-        {
-          text: 'Confirm',
-          onPress: () => {
-            // Here you would navigate to the checkout screen
-            // For now, just show a success message
-            Alert.alert('Success', 'Order created successfully');
-            navigation.navigate('Dashboard', { 
-              businessId: businessId as string,
-            });
-          }
-        }
-      ]
-    );
+    // Prepare cart items for checkout screen
+    const checkoutItems = cart.map(item => ({
+      id: item.id,
+      name: item.name,
+      price: item.price,
+      quantity: item.quantity,
+      type: item.type,
+      serviceId: item.serviceId,
+      imageUrl: item.imageUrl
+    }));
+    
+    // Navigate to checkout screen
+    navigation.navigate('Checkout', {
+      businessId: businessId as string,
+      customerId: customerId as string,
+      customerName: customerName,
+      items: checkoutItems,
+      total: calculateTotal(),
+      pickupDate: pickupDate.toISOString(),
+      customerPreferences: customerPreferences
+    });
   };
   
   const renderServiceItem = ({ item }: { item: ServiceWithProducts }) => {

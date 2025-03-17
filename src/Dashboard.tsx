@@ -18,6 +18,7 @@ export default function Dashboard({ route }: DashboardScreenProps) {
     { title: 'Orders', screen: 'Orders', icon: '📝' },
     { title: 'Customers', screen: 'Customers', icon: '👤' },
     { title: 'Reports', screen: 'Reports', icon: '📊' },
+    { title: 'Data Export', screen: 'DataExport', icon: '💾' },
     { title: 'Settings', screen: 'Settings', icon: '⚙️' },
   ];
 
@@ -31,6 +32,7 @@ export default function Dashboard({ route }: DashboardScreenProps) {
       case 'Orders':
       case 'Customers':
       case 'Reports':
+      case 'DataExport':
       case 'Settings':
         navigation.navigate(screenName, { businessId });
         break;

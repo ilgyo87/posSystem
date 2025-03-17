@@ -11,6 +11,8 @@ import ServiceManagement from "./src/ServiceManagement"
 import ProductManagement from "./src/ProductManagement"
 import CustomerSelection from "./src/CustomerSelection"
 import ProductSelectionScreen from "./src/ProductSelectionScreen"
+import CheckoutScreen from "./src/CheckoutScreen"
+import DataExportScreen from "./src/DataExportScreen"
 import type { RootStackParamList } from "./src/types"
 
 Amplify.configure(outputs)
@@ -56,6 +58,16 @@ export default function App() {
                 name="ProductSelection" 
                 component={ProductSelectionScreen} 
                 options={{ title: "Select Products" }}
+              />
+              <Stack.Screen 
+                name="Checkout" 
+                component={CheckoutScreen} 
+                options={{ title: "Checkout" }}
+              />
+              <Stack.Screen 
+                name="DataExport" 
+                component={DataExportScreen} 
+                options={{ title: "Data Export" }}
               />
             </Stack.Navigator>
           </NavigationContainer>

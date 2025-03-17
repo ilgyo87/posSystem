@@ -12,7 +12,8 @@ const schema = a.schema({
       orders: a.hasMany("Order", "businessID"),
       appointments: a.hasMany("Appointment", "businessID"),
       customers: a.hasMany("Customer", "businessID"),
-      products: a.hasMany("Product", "businessID")
+      products: a.hasMany("Product", "businessID"),
+      transactions: a.hasMany("Transaction", "businessID")
     })
     .authorization((allow) => allow.owner()),
 
@@ -112,7 +113,8 @@ const schema = a.schema({
       notificationPreferences: a.boolean().required(), // true if they want notifications
       business: a.belongsTo("Business", "businessID"),
       orders: a.hasMany("Order", "customerID"),
-      appointments: a.hasMany("Appointment", "customerID")
+      appointments: a.hasMany("Appointment", "customerID"),
+      transactions: a.hasMany("Transaction", "customerID")
     })
     .authorization((allow) => allow.owner()),
     
@@ -129,6 +131,39 @@ const schema = a.schema({
       isActive: a.boolean().required(),
       service: a.belongsTo("Service", "serviceID"),
       business: a.belongsTo("Business", "businessID")
+    })
+    .authorization((allow) => allow.owner()),
+    
+  Transaction: a
+    .model({
+      id: a.id().required(),
+      businessID: a.id().required(),
+      customerID: a.id().required(),
+      status: a.string().required(), // PENDING, COMPLETED, CANCELLED
+      total: a.float().required(),
+      paymentMethod: a.string().required(), // CASH, CARD, OTHER
+      pickupDate: a.string().required(),
+      customerNotes: a.string(),
+      receiptSent: a.boolean(),
+      receiptEmail: a.string(),
+      customerPhone: a.string(),
+      business: a.belongsTo("Business", "businessID"),
+      customer: a.belongsTo("Customer", "customerID"),
+      items: a.hasMany("TransactionItem", "transactionID")
+    })
+    .authorization((allow) => allow.owner()),
+    
+  TransactionItem: a
+    .model({
+      id: a.id().required(),
+      transactionID: a.id().required(),
+      itemType: a.string().required(), // SERVICE, PRODUCT
+      name: a.string().required(),
+      quantity: a.integer().required(),
+      price: a.float().required(),
+      serviceID: a.id(),
+      productID: a.id(),
+      transaction: a.belongsTo("Transaction", "transactionID")
     })
     .authorization((allow) => allow.owner())
 });
