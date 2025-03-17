@@ -1,11 +1,10 @@
 import React, { useState } from "react"
-import { View, Text, TextInput, Button, Alert, StyleSheet } from "react-native"
+import { View, Text, TextInput, Button, Alert, StyleSheet, Platform } from "react-native"
 import { useAuthenticator } from "@aws-amplify/ui-react-native"
-import { generateClient } from "aws-amplify/api"
-import { type GraphQLResult } from '@aws-amplify/api-graphql'
 import { useNavigation } from "@react-navigation/native"
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack"
 import type { RootStackParamList } from '../src/types';
+import { v4 as uuidv4 } from 'uuid';
 
 // Format phone number to E.164 format
 const formatPhoneNumber = (phone: string) => {
@@ -49,52 +48,45 @@ export default function BusinessCreate() {
     setIsCreating(true)
 
     try {
-      // Use the Amplify GraphQL API
-      const createBusinessMutation = `
-        mutation CreateBusiness($name: String!, $phoneNumber: String!, $location: String) {
-          createBusiness(input: {name: $name, phoneNumber: $phoneNumber, location: $location}) {
-            id
-            name
-            phoneNumber
-            location
-          }
-        }
-      `;
-
-      // Use the Amplify GraphQL client
-      const graphqlClient = generateClient();
+      // Generate a unique ID for the business
+      const businessId = uuidv4();
       
-      // Define the expected result type
-      interface CreateBusinessResult {
-        createBusiness: {
-          id: string;
-          name: string;
-          phoneNumber: string;
-          location?: string;
+      // Create business object
+      const newBusiness = {
+        id: businessId,
+        name: businessName,
+        phoneNumber: formattedPhone,
+        location: location || null,
+        createdAt: new Date().toISOString(),
+        owner: defaultOwnerEmail
+      };
+      
+      // Store in localStorage if on web platform
+      if (Platform.OS === 'web') {
+        try {
+          // Get existing businesses or initialize empty array
+          const existingBusinessesJson = localStorage.getItem('businesses') || '[]';
+          const existingBusinesses = JSON.parse(existingBusinessesJson);
+          
+          // Add new business
+          existingBusinesses.push(newBusiness);
+          
+          // Save back to localStorage
+          localStorage.setItem('businesses', JSON.stringify(existingBusinesses));
+          
+          console.log('Business created and saved to localStorage:', newBusiness);
+        } catch (storageError) {
+          console.error('Error saving to localStorage:', storageError);
         }
       }
-      
-      // Execute the mutation with the client
-      const result = await graphqlClient.graphql({
-        query: createBusinessMutation,
-        variables: {
-          name: businessName,
-          phoneNumber: formattedPhone,
-          location: location || null
-        }
-      }) as GraphQLResult<CreateBusinessResult>;
       
       setIsCreating(false);
       
-      if (!result.data || !result.data.createBusiness) {
-        Alert.alert("Error", "Failed to create business: No data returned");
-      } else {
-        // Navigate to Dashboard with business info
-        navigation.navigate("Dashboard", { 
-          businessId: result.data.createBusiness.id,
-          businessName: result.data.createBusiness.name
-        });
-      }
+      // Navigate to Dashboard with business info
+      navigation.navigate("Dashboard", { 
+        businessId: businessId,
+        businessName: businessName
+      });
     } catch (error: any) {
       setIsCreating(false);
       console.error("Create business error:", error);
