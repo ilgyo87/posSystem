@@ -1,7 +1,7 @@
 import React, { useState } from "react"
 import { View, Text, TextInput, Button, Alert, StyleSheet } from "react-native"
 import { useAuthenticator } from "@aws-amplify/ui-react-native"
-import { generateClient } from "aws-amplify/api"
+import { fetchAuthSession } from "aws-amplify/auth"
 import { useNavigation } from "@react-navigation/native"
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack"
 import type { RootStackParamList } from '../src/types';
@@ -69,8 +69,9 @@ export default function BusinessCreate() {
       // Use the GraphQL API directly through fetch
       const apiEndpoint = "https://o6ewbmbljfhm5jiyb4qsrphhdu.appsync-api.us-east-1.amazonaws.com/graphql";
       
-      // Get the current authenticated user's token
-      const token = (user as any).signInUserSession.idToken.jwtToken;
+      // Get the current authenticated user's token using Amplify Gen 2 approach
+      const { tokens } = await fetchAuthSession();
+      const token = tokens?.idToken?.toString() || '';
       
       const response = await fetch(apiEndpoint, {
         method: 'POST',
