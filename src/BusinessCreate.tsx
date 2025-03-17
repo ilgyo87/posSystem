@@ -1,13 +1,10 @@
 import React, { useState } from "react"
 import { View, Text, TextInput, Button, Alert, StyleSheet } from "react-native"
 import { useAuthenticator } from "@aws-amplify/ui-react-native"
-import { generateClient } from "aws-amplify/data"
+import { generateClient } from "aws-amplify/api"
 import { useNavigation } from "@react-navigation/native"
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack"
 import type { RootStackParamList } from '../src/types';
-
-// Create a client without type checking for production environment
-const client = generateClient() as any
 
 // Format phone number to E.164 format
 const formatPhoneNumber = (phone: string) => {
@@ -51,29 +48,61 @@ export default function BusinessCreate() {
     setIsCreating(true)
 
     try {
-      const result = await client.models.Business.create({
-        name: businessName,
-        phoneNumber: formattedPhone,
-        location: location || undefined // Only send if it has a value
-      })
+      // Direct GraphQL mutation instead of using client.models
+      const createBusinessMutation = `mutation CreateBusiness($input: CreateBusinessInput!) {
+        createBusiness(input: $input) {
+          id
+          name
+          phoneNumber
+          location
+        }
+      }`;
+
+      const variables = {
+        input: {
+          name: businessName,
+          phoneNumber: formattedPhone,
+          location: location || null
+        }
+      };
+
+      // Use the GraphQL API directly through fetch
+      const apiEndpoint = "https://o6ewbmbljfhm5jiyb4qsrphhdu.appsync-api.us-east-1.amazonaws.com/graphql";
       
-      setIsCreating(false)
+      // Get the current authenticated user's token
+      const token = (user as any).signInUserSession.idToken.jwtToken;
+      
+      const response = await fetch(apiEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': token
+        },
+        body: JSON.stringify({
+          query: createBusinessMutation,
+          variables: variables
+        })
+      });
+      
+      const result = await response.json();
+      
+      setIsCreating(false);
       
       if (result.errors) {
-        Alert.alert("Error creating business", JSON.stringify(result.errors))
-      } else if (!result.data) {
-        Alert.alert("Error", "Failed to create business: No data returned")
+        Alert.alert("Error creating business", JSON.stringify(result.errors));
+      } else if (!result.data || !result.data.createBusiness) {
+        Alert.alert("Error", "Failed to create business: No data returned");
       } else {
         // Navigate to Dashboard with business info
         navigation.navigate("Dashboard", { 
-          businessId: result.data.id,
-          businessName: result.data.name
-        })
+          businessId: result.data.createBusiness.id,
+          businessName: result.data.createBusiness.name
+        });
       }
     } catch (error: any) {
-      setIsCreating(false)
-      console.error("Create business error:", error)
-      Alert.alert("Error", error.message || "Failed to create business")
+      setIsCreating(false);
+      console.error("Create business error:", error);
+      Alert.alert("Error", error.message || "Failed to create business");
     }
   }
 
