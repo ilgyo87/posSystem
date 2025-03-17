@@ -48,35 +48,38 @@ try {
 
 const Stack = createNativeStackNavigator<RootStackParamList>()
 
-export default function App() {
+function App() {
   return (
     <SafeAreaProvider>
       <Authenticator.Provider>
-        <Authenticator>
+        <Authenticator
+          Container={(props) => (
+            <View style={{ flex: 1, paddingTop: 20 }}>
+              {props.children}
+            </View>
+          )}
+        >
           <NavigationContainer>
             <Stack.Navigator initialRouteName="BusinessCreate">
               <Stack.Screen 
                 name="BusinessCreate" 
                 component={BusinessCreate} 
-                options={{ title: "Create Business" }}
+                options={{ headerShown: false }}
               />
               <Stack.Screen 
                 name="Dashboard" 
                 component={Dashboard} 
-                options={({ route }) => ({ 
-                  title: route.params?.businessName || "Dashboard",
-                  headerBackVisible: false // Prevent going back to business creation
-                })}
+                options={{ headerShown: false }}
               />
               <Stack.Screen 
                 name="ServiceManagement" 
                 component={ServiceManagement} 
-                options={{ title: "Service Management" }}
+                options={{ title: "Manage Services" }}
               />
               <Stack.Screen 
                 name="ProductManagement" 
                 component={ProductManagement} 
-                options={{ title: "Product Management" }}
+                options={{ title: "Manage Products" }}
               />
               <Stack.Screen 
                 name="CustomerSelection" 
@@ -96,7 +99,7 @@ export default function App() {
               <Stack.Screen 
                 name="DataExport" 
                 component={DataExportScreen} 
-                options={{ title: "Data Export" }}
+                options={{ title: "Export Data" }}
               />
             </Stack.Navigator>
           </NavigationContainer>
@@ -105,3 +108,5 @@ export default function App() {
     </SafeAreaProvider>
   )
 }
+
+export default App
