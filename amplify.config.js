@@ -26,5 +26,33 @@ module.exports = {
         }
       }
     }
+  },
+  build: {
+    buildspec: {
+      phases: {
+        preBuild: {
+          commands: [
+            'nvm use 18',
+            'npm ci'
+          ]
+        },
+        build: {
+          commands: [
+            'npm run build'
+          ]
+        }
+      },
+      artifacts: {
+        baseDirectory: 'build',
+        files: [
+          '**/*'
+        ]
+      },
+      cache: {
+        paths: [
+          'node_modules/**/*'
+        ]
+      }
+    }
   }
 };
