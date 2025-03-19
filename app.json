@@ -14,14 +14,19 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.expo-iggy.posSystem"
+      "bundleIdentifier": "com.expo-iggy.posSystem",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Allow $(PRODUCT_NAME) to access your camera to scan QR codes"
+      },
+      "deploymentTarget": "13.0"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.expo_iggy.posSystem"
+      "package": "com.expo_iggy.posSystem",
+      "permissions": ["android.permission.CAMERA"]
     },
     "web": {
       "favicon": "./assets/favicon.png"

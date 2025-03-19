@@ -1,10 +1,14 @@
 import React, { useState } from "react"
-import { View, Text, TextInput, Button, Alert, StyleSheet, Platform } from "react-native"
+import { View, Text, TextInput, Button, Alert, StyleSheet, Platform, ActivityIndicator } from "react-native"
 import { useAuthenticator } from "@aws-amplify/ui-react-native"
 import { useNavigation } from "@react-navigation/native"
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack"
 import type { RootStackParamList } from '../src/types';
 import { v4 as uuidv4 } from 'uuid';
+import { generateClient } from 'aws-amplify/data'
+import type { Schema } from '../amplify/data/resource'
+
+const client = generateClient<Schema>()
 
 // Format phone number to E.164 format
 const formatPhoneNumber = (phone: string) => {
@@ -56,28 +60,14 @@ export default function BusinessCreate() {
         id: businessId,
         name: businessName,
         phoneNumber: formattedPhone,
-        location: location || null,
-        createdAt: new Date().toISOString(),
-        owner: defaultOwnerEmail
+        location: location || undefined
       };
       
-      // Store in localStorage if on web platform
-      if (Platform.OS === 'web') {
-        try {
-          // Get existing businesses or initialize empty array
-          const existingBusinessesJson = localStorage.getItem('businesses') || '[]';
-          const existingBusinesses = JSON.parse(existingBusinessesJson);
-          
-          // Add new business
-          existingBusinesses.push(newBusiness);
-          
-          // Save back to localStorage
-          localStorage.setItem('businesses', JSON.stringify(existingBusinesses));
-          
-          console.log('Business created and saved to localStorage:', newBusiness);
-        } catch (storageError) {
-          console.error('Error saving to localStorage:', storageError);
-        }
+      // Save to Amplify Data API
+      const result = await client.models.Business.create(newBusiness);
+      
+      if (result.errors) {
+        throw new Error(result.errors[0].message);
       }
       
       setIsCreating(false);
@@ -121,6 +111,7 @@ export default function BusinessCreate() {
         onPress={createBusiness}
         disabled={isCreating} 
       />
+      {isCreating && <ActivityIndicator style={styles.loader} />}
     </View>
   )
 }
@@ -144,5 +135,8 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     marginBottom: 15,
     paddingHorizontal: 10,
+  },
+  loader: {
+    marginTop: 20,
   },
 })

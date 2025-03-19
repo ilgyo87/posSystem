@@ -16,11 +16,23 @@ export default function Dashboard({ route }: DashboardScreenProps) {
   const { businessId, businessName } = route.params;
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [initializing, setInitializing] = useState(true);
+  const [business, setBusiness] = useState<Schema['Business']['type'] | null>(null);
 
   // Initialize services and products when Dashboard loads
   useEffect(() => {
     async function initializeData() {
       try {
+        // Fetch business details
+        const businessResult = await client.models.Business.get({
+          id: businessId as string
+        });
+        
+        if (businessResult.errors) {
+          console.error('Error fetching business:', businessResult.errors);
+        } else {
+          setBusiness(businessResult.data);
+        }
+
         // Check if services already exist for this business
         const servicesResult = await client.models.Service.list({
           filter: { businessID: { eq: businessId as string } }
@@ -144,7 +156,7 @@ export default function Dashboard({ route }: DashboardScreenProps) {
     return (
       <View style={[styles.container, styles.loadingContainer]}>
         <ActivityIndicator size="large" color="#2196F3" />
-        <Text style={styles.loadingText}>Initializing services...</Text>
+        <Text style={styles.loadingText}>Loading business data...</Text>
       </View>
     );
   }
@@ -152,7 +164,7 @@ export default function Dashboard({ route }: DashboardScreenProps) {
   return (
     <ScrollView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.businessName}>{businessName || 'My Business'}</Text>
+        <Text style={styles.businessName}>{business?.name || businessName || 'My Business'}</Text>
         <Text style={styles.subtitle}>Dashboard</Text>
       </View>
 

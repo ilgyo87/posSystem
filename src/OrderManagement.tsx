@@ -7,7 +7,8 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
-  TextInput
+  TextInput,
+  Modal
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -17,6 +18,8 @@ import type { RootStackParamList } from './types';
 // Import the GraphQL queries and mutations
 import * as queries from './graphql/queries';
 import * as mutations from './graphql/mutations';
+import QRCode from 'react-native-qrcode-svg';
+import { QRScanner } from './components/QRScanner';
 
 // Initialize Amplify client
 const client = generateClient<Schema>();
@@ -39,6 +42,12 @@ export default function OrderManagement({ route }: OrderManagementScreenProps) {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
+  const [selectedOrder, setSelectedOrder] = useState<Schema['Transaction']['type'] | null>(null);
+  const [showQRModal, setShowQRModal] = useState(false);
+  const [showScanModal, setShowScanModal] = useState(false);
+  const [garments, setGarments] = useState<Schema['Garment']['type'][]>([]);
+  const [selectedItem, setSelectedItem] = useState<Schema['TransactionItem']['type'] | null>(null);
+  const [garmentDescription, setGarmentDescription] = useState('');
 
   useEffect(() => {
     fetchOrders();
@@ -78,6 +87,32 @@ export default function OrderManagement({ route }: OrderManagementScreenProps) {
     }
   };
 
+  const fetchGarments = async (orderId: string) => {
+    try {
+      const itemsResult = await client.models.TransactionItem.list({
+        filter: { transactionID: { eq: orderId } }
+      });
+
+      if (itemsResult.errors) {
+        throw new Error('Failed to fetch order items');
+      }
+
+      const garmentsPromises = itemsResult.data?.map(async (item) => {
+        const garmentsResult = await client.models.Garment.list({
+          filter: { transactionItemID: { eq: item.id } }
+        });
+        return garmentsResult.data || [];
+      }) || [];
+
+      const garmentsResults = await Promise.all(garmentsPromises);
+      const allGarments = garmentsResults.flat();
+      setGarments(allGarments);
+    } catch (error) {
+      console.error('Error fetching garments:', error);
+      Alert.alert('Error', 'Failed to fetch garments');
+    }
+  };
+
   const handleViewOrderDetails = (order: Schema['Transaction']['type']) => {
     navigation.navigate('OrderDetails' as any, { 
       orderId: order.id, 
@@ -86,33 +121,91 @@ export default function OrderManagement({ route }: OrderManagementScreenProps) {
   };
 
   const handleScanBarcode = () => {
-    navigation.navigate('BarcodeScanner' as any, { 
-      businessId,
-      onScan: (barcodeData: string) => {
-        // On successful scan, search for the order with this barcode
-        const filteredOrders = orders.filter(
-          order => order.id === barcodeData
+    setShowScanModal(true);
+  };
+
+  const handleQRScan = async (qrCode: string) => {
+    try {
+      // First try to find a garment with this QR code
+      const garmentResult = await client.models.Garment.list({
+        filter: { qrCode: { eq: qrCode } }
+      });
+
+      if (garmentResult.data && garmentResult.data.length > 0) {
+        // Found a garment, update its status
+        const garment = garmentResult.data[0];
+        const updateResult = await client.models.Garment.update({
+          id: garment.id,
+          lastScanned: new Date().toISOString(),
+          status: 'IN_PROGRESS'
+        });
+
+        if (updateResult.errors || !updateResult.data) {
+          throw new Error('Failed to update garment status');
+        }
+
+        setGarments(prevGarments => 
+          prevGarments.map(g => g.id === garment.id ? updateResult.data! : g)
         );
-        
-        if (filteredOrders.length > 0) {
-          // Navigate to the order details
-          handleViewOrderDetails(filteredOrders[0]);
+        Alert.alert('Success', 'Garment status updated successfully');
+      } else {
+        // Try to find an order with this QR code
+        const orderResult = await client.models.Transaction.list({
+          filter: { id: { eq: qrCode } }
+        });
+
+        if (orderResult.data && orderResult.data.length > 0) {
+          const order = orderResult.data[0];
+          navigation.navigate('OrderDetails' as any, { 
+            orderId: order.id, 
+            businessId 
+          });
         } else {
-          // No order found with this barcode
-          Alert.alert(
-            'Order Not Found', 
-            `No order found with ID/Number: ${barcodeData}`,
-            [
-              { text: 'OK' },
-              { 
-                text: 'Create New', 
-                onPress: () => navigation.navigate('CustomerSelection' as any, { businessId })
-              }
-            ]
-          );
+          Alert.alert('Not Found', 'No order or garment found with this QR code');
         }
       }
-    });
+    } catch (error) {
+      console.error('Error scanning QR code:', error);
+      Alert.alert('Error', 'Failed to process QR code');
+    } finally {
+      setShowScanModal(false);
+    }
+  };
+
+  const handleGenerateQR = async (item: Schema['TransactionItem']['type']) => {
+    setSelectedItem(item);
+    setShowQRModal(true);
+  };
+
+  const handleCreateGarment = async () => {
+    if (!selectedItem || !garmentDescription.trim()) return;
+
+    try {
+      const garmentResult = await client.models.Garment.create({
+        transactionItemID: selectedItem.id,
+        qrCode: `${selectedItem.id}-${Date.now()}`,
+        description: garmentDescription,
+        status: 'PENDING'
+      });
+
+      if (garmentResult.errors || !garmentResult.data) {
+        throw new Error('Failed to create garment');
+      }
+
+      setGarments(prevGarments => [...prevGarments, garmentResult.data!]);
+      setShowQRModal(false);
+      setGarmentDescription('');
+      Alert.alert('Success', 'Garment QR code generated successfully');
+    } catch (error) {
+      console.error('Error creating garment:', error);
+      Alert.alert('Error', 'Failed to generate QR code');
+    }
+  };
+
+  const handleViewGarments = async (order: Schema['Transaction']['type']) => {
+    setSelectedOrder(order);
+    await fetchGarments(order.id);
+    setShowQRModal(true);
   };
 
   const getFilteredOrders = () => {
@@ -170,9 +263,12 @@ export default function OrderManagement({ route }: OrderManagementScreenProps) {
           <Text style={styles.orderTotal}>
             Total: ${Number(item.total || 0).toFixed(2)}
           </Text>
-          <Text style={styles.orderItems}>
-            Order Items
-          </Text>
+          <TouchableOpacity 
+            style={styles.manageGarmentsButton}
+            onPress={() => handleViewGarments(item)}
+          >
+            <Text style={styles.manageGarmentsButtonText}>Manage Garments</Text>
+          </TouchableOpacity>
         </View>
       </TouchableOpacity>
     );
@@ -182,6 +278,9 @@ export default function OrderManagement({ route }: OrderManagementScreenProps) {
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Order Management</Text>
+        <TouchableOpacity style={styles.scanButton} onPress={handleScanBarcode}>
+          <Text style={styles.scanButtonText}>Scan QR</Text>
+        </TouchableOpacity>
       </View>
       
       <View style={styles.searchContainer}>
@@ -191,13 +290,6 @@ export default function OrderManagement({ route }: OrderManagementScreenProps) {
           value={searchQuery}
           onChangeText={setSearchQuery}
         />
-        
-        <TouchableOpacity 
-          style={styles.scanButton}
-          onPress={handleScanBarcode}
-        >
-          <Text style={styles.scanButtonText}>Scan</Text>
-        </TouchableOpacity>
       </View>
       
       <View style={styles.filterContainer}>
@@ -258,6 +350,102 @@ export default function OrderManagement({ route }: OrderManagementScreenProps) {
           )}
         </>
       )}
+
+      {/* QR Code Generation Modal */}
+      <Modal
+        visible={showQRModal}
+        animationType="slide"
+        transparent={true}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>
+              {selectedItem ? 'Generate Garment QR Code' : 'Manage Garments'}
+            </Text>
+            
+            {selectedItem ? (
+              <>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter garment description"
+                  value={garmentDescription}
+                  onChangeText={setGarmentDescription}
+                  multiline
+                />
+                
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity 
+                    style={[styles.modalButton, styles.cancelButton]}
+                    onPress={() => {
+                      setShowQRModal(false);
+                      setGarmentDescription('');
+                      setSelectedItem(null);
+                    }}
+                  >
+                    <Text style={styles.modalButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity 
+                    style={[styles.modalButton, styles.confirmButton]}
+                    onPress={handleCreateGarment}
+                    disabled={!garmentDescription.trim()}
+                  >
+                    <Text style={styles.modalButtonText}>Generate QR</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : (
+              <>
+                <View style={styles.garmentsList}>
+                  {garments.map(garment => (
+                    <View key={garment.id} style={styles.garmentItem}>
+                      <Text style={styles.garmentDescription}>{garment.description}</Text>
+                      <Text style={styles.garmentStatus}>Status: {garment.status}</Text>
+                      {garment.lastScanned && (
+                        <Text style={styles.garmentScanned}>
+                          Last scanned: {formatDate(garment.lastScanned)}
+                        </Text>
+                      )}
+                      <View style={styles.garmentActions}>
+                        <TouchableOpacity 
+                          style={styles.viewQRButton}
+                          onPress={() => {
+                            setSelectedItem({ id: garment.transactionItemID } as Schema['TransactionItem']['type']);
+                            setGarmentDescription(garment.description);
+                            setShowQRModal(false);
+                            setTimeout(() => setShowQRModal(true), 100);
+                          }}
+                        >
+                          <Text style={styles.viewQRButtonText}>View QR Code</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+                
+                <TouchableOpacity 
+                  style={[styles.modalButton, styles.confirmButton]}
+                  onPress={() => setShowQRModal(false)}
+                >
+                  <Text style={styles.modalButtonText}>Close</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* QR Scanner Modal */}
+      <Modal
+        visible={showScanModal}
+        animationType="slide"
+        onRequestClose={() => setShowScanModal(false)}
+      >
+        <QRScanner
+          onScan={handleQRScan}
+          onClose={() => setShowScanModal(false)}
+        />
+      </Modal>
     </View>
   );
 }
@@ -268,10 +456,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8f9fa',
   },
   header: {
-    padding: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 10,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
-    borderBottomColor: '#eaeaea',
+    borderBottomColor: '#ddd',
   },
   headerTitle: {
     fontSize: 20,
@@ -296,12 +487,12 @@ const styles = StyleSheet.create({
   },
   scanButton: {
     backgroundColor: '#2196F3',
-    paddingHorizontal: 16,
-    justifyContent: 'center',
-    borderRadius: 4,
+    padding: 10,
+    borderRadius: 5,
   },
   scanButtonText: {
     color: '#fff',
+    fontSize: 16,
     fontWeight: '500',
   },
   filterContainer: {
@@ -421,8 +612,99 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#333',
   },
-  orderItems: {
+  manageGarmentsButton: {
+    backgroundColor: '#2196F3',
+    padding: 8,
+    borderRadius: 4,
+  },
+  manageGarmentsButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  modalContent: {
+    flex: 1,
+    backgroundColor: '#fff',
+    margin: 20,
+    borderRadius: 8,
+    padding: 20,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 4,
+    padding: 12,
+    marginBottom: 16,
+    minHeight: 100,
+    textAlignVertical: 'top',
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  modalButton: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 4,
+    marginHorizontal: 8,
+  },
+  cancelButton: {
+    backgroundColor: '#f44336',
+  },
+  confirmButton: {
+    backgroundColor: '#4CAF50',
+  },
+  modalButtonText: {
+    color: '#fff',
+    textAlign: 'center',
+    fontWeight: '500',
+  },
+  garmentsList: {
+    flex: 1,
+  },
+  garmentItem: {
+    backgroundColor: '#f8f9fa',
+    padding: 12,
+    borderRadius: 4,
+    marginBottom: 8,
+  },
+  garmentDescription: {
+    fontSize: 16,
+    color: '#333',
+    marginBottom: 4,
+  },
+  garmentStatus: {
     fontSize: 14,
     color: '#666',
+  },
+  garmentScanned: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
+  },
+  garmentActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 8,
+  },
+  viewQRButton: {
+    backgroundColor: '#2196F3',
+    padding: 8,
+    borderRadius: 4,
+  },
+  viewQRButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '500',
   },
 });

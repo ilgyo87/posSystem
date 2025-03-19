@@ -177,6 +177,7 @@ const schema = a.schema({
       status: a.string().required(), // PENDING, IN_PROGRESS, COMPLETED, CANCELLED
       notes: a.string(),
       lastScanned: a.datetime(),
+      imageUrl: a.string(),
       transactionItem: a.belongsTo("TransactionItem", "transactionItemID")
     })
     .authorization((allow) => allow.owner())
