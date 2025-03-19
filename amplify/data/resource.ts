@@ -163,7 +163,21 @@ const schema = a.schema({
       price: a.float().required(),
       serviceID: a.id(),
       productID: a.id(),
-      transaction: a.belongsTo("Transaction", "transactionID")
+      transaction: a.belongsTo("Transaction", "transactionID"),
+      garments: a.hasMany("Garment", "transactionItemID")
+    })
+    .authorization((allow) => allow.owner()),
+
+  Garment: a
+    .model({
+      id: a.id().required(),
+      transactionItemID: a.id().required(),
+      qrCode: a.string().required(),
+      description: a.string().required(),
+      status: a.string().required(), // PENDING, IN_PROGRESS, COMPLETED, CANCELLED
+      notes: a.string(),
+      lastScanned: a.datetime(),
+      transactionItem: a.belongsTo("TransactionItem", "transactionItemID")
     })
     .authorization((allow) => allow.owner())
 });

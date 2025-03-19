@@ -81,7 +81,7 @@ export default function CheckoutScreen({ route, navigation }: CheckoutScreenProp
       const transactionResponse = await client.models.Transaction.create({
         businessID: businessId,
         customerID: customerId,
-        status: 'COMPLETED',
+        status: 'PENDING',
         total: total,
         paymentMethod: paymentMethod,
         pickupDate: pickupDate,
@@ -651,7 +651,6 @@ const styles = StyleSheet.create({
   receiptNotes: {
     fontSize: 14,
     color: '#666',
-    fontStyle: 'italic',
     marginTop: 4,
   },
   receiptItemsHeader: {

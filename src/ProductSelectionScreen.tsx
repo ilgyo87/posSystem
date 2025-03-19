@@ -14,14 +14,12 @@ import {
   useWindowDimensions
 } from 'react-native';
 import { Calendar } from 'react-native-calendars';
-import { defaultServices, defaultProducts } from './data/defaultData';
+// Default data now handled in Dashboard
 import { commonStyles } from './styles/common.styles';
-import { generateClient } from 'aws-amplify/data';
+import { client } from './amplifyConfig';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { Schema } from '../amplify/data/resource';
 import type { RootStackParamList } from './types';
-
-const client = generateClient<Schema>();
 
 // Define types for our cart items
 type CartItem = {
@@ -111,11 +109,10 @@ export default function ProductSelectionScreen({ route, navigation }: ProductSel
       
       const servicesData = servicesResult.data ?? [];
       
-      // If no services exist, create default services
+      // No need to create default services, they're now created in Dashboard
       if (servicesData.length === 0) {
-        await createDefaultServices();
-        // Fetch again after creating defaults
-        fetchServicesAndProducts();
+        setLoading(false);
+        Alert.alert('No Services', 'No services found for this business. Please check with your administrator.');
         return;
       }
       
@@ -148,57 +145,7 @@ export default function ProductSelectionScreen({ route, navigation }: ProductSel
     }
   };
   
-  const createDefaultServices = async () => {
-    try {
-      // Create default services using the imported data
-      for (const serviceData of defaultServices) {
-        const result = await client.models.Service.create({
-          ...serviceData,
-          businessID: businessId as string
-        });
-        
-        if (result.errors) {
-          console.error('Error creating default service:', result.errors);
-          continue;
-        }
-        
-        // Create default products for each service
-        if (result.data?.id) {
-          await createDefaultProducts(result.data.id, serviceData.category);
-        } else {
-          console.error('Error: Service ID is undefined');
-        }
-      }
-      
-      Alert.alert('Success', 'Default services and products created');
-    } catch (error) {
-      console.error('Error creating default services:', error);
-      Alert.alert('Error', 'Failed to create default services');
-    }
-  };
-  
-  const createDefaultProducts = async (serviceId: string, category: string) => {
-    try {
-      // Get products from the imported defaultProducts based on category
-      const productsForCategory = defaultProducts[category as keyof typeof defaultProducts] || [];
-      
-      // Create each product
-      for (const productData of productsForCategory) {
-        await client.models.Product.create({
-          serviceID: serviceId,
-          businessID: businessId as string,
-          name: productData.name,
-          description: productData.description,
-          price: productData.price,
-          imageUrl: productData.imageUrl,
-          inventory: 999, // Unlimited inventory for services
-          isActive: true
-        });
-      }
-    } catch (error) {
-      console.error('Error creating default products:', error);
-    }
-  };
+  // Default services creation has been moved to Dashboard component
   
   const handleViewProductDetails = (product: Schema['Product']['type']) => {
     setSelectedProduct(product);

@@ -31,4 +31,12 @@ export type RootStackParamList = {
   Reports: { businessId?: string };
   Settings: { businessId?: string };
   DataExport: { businessId?: string };
+  // Order Management Screens
+  OrderManagement: { businessId: string };
+  OrderDetails: { orderId: string; businessId: string };
+  BarcodeScanner: { 
+    businessId: string; 
+    onScan: (barcodeData: string) => void 
+  };
+  EditOrder: { orderId: string; businessId: string };
 };

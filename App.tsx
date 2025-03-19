@@ -4,6 +4,8 @@ import { Authenticator } from "@aws-amplify/ui-react-native"
 import { NavigationContainer } from '@react-navigation/native'
 import { createNativeStackNavigator } from '@react-navigation/native-stack'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
+
+// Import all screens directly from src directory
 import BusinessCreate from "./src/BusinessCreate"
 import Dashboard from "./src/Dashboard"
 import ServiceManagement from "./src/ServiceManagement"
@@ -12,6 +14,12 @@ import CustomerSelection from "./src/CustomerSelection"
 import ProductSelectionScreen from "./src/ProductSelectionScreen"
 import CheckoutScreen from "./src/CheckoutScreen"
 import DataExportScreen from "./src/DataExportScreen"
+
+// Order management screens
+import OrderManagement from "./src/OrderManagement"
+import OrderDetails from "./src/OrderDetails"
+import BarcodeScanner from "./src/BarcodeScanner"
+
 import type { RootStackParamList } from "./src/types"
 
 // Configure Amplify with hardcoded values for build process
@@ -46,9 +54,13 @@ try {
   console.log("amplify_outputs.json not found, using default config")
 }
 
+// Create the stack navigator with explicit type
 const Stack = createNativeStackNavigator<RootStackParamList>()
 
 export default function App() {
+  // Console log to verify app is loading properly
+  console.log('App initializing')
+  
   return (
     <SafeAreaProvider>
       <Authenticator.Provider>
@@ -97,6 +109,21 @@ export default function App() {
                 name="DataExport" 
                 component={DataExportScreen} 
                 options={{ title: "Data Export" }}
+              />
+              <Stack.Screen 
+                name="OrderManagement" 
+                component={OrderManagement} 
+                options={{ title: "Order Management" }}
+              />
+              <Stack.Screen 
+                name="OrderDetails" 
+                component={OrderDetails} 
+                options={{ title: "Order Details" }}
+              />
+              <Stack.Screen 
+                name="BarcodeScanner" 
+                component={BarcodeScanner} 
+                options={{ title: "Scan Barcode" }}
               />
             </Stack.Navigator>
           </NavigationContainer>
