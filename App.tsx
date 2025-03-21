@@ -21,6 +21,7 @@ import DataExportScreen from "./src/DataExportScreen"
 import OrderManagement from "./src/OrderManagement"
 import OrderDetails from "./src/OrderDetails"
 import BarcodeScanner from "./src/BarcodeScanner"
+import RackAssignment from "./src/RackAssignment"
 
 import type { RootStackParamList } from "./src/types"
 
@@ -156,6 +157,11 @@ function AppContent() {
           name="BarcodeScanner" 
           component={BarcodeScanner} 
           options={{ title: "Scan Barcode" }}
+        />
+        <Stack.Screen 
+          name="RackAssignment" 
+          component={RackAssignment} 
+          options={{ title: "Rack Assignment" }}
         />
       </Stack.Navigator>
     </NavigationContainer>

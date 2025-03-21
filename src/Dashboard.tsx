@@ -13,18 +13,25 @@ const client = generateClient<Schema>();
 type DashboardScreenProps = NativeStackScreenProps<RootStackParamList, 'Dashboard'>;
 
 export default function Dashboard({ route }: DashboardScreenProps) {
-  const { businessId, businessName } = route.params;
+  const { businessId } = route.params || {};
+  const businessName = route.params?.businessName;
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [initializing, setInitializing] = useState(true);
   const [business, setBusiness] = useState<Schema['Business']['type'] | null>(null);
 
   // Initialize services and products when Dashboard loads
   useEffect(() => {
+    if (!businessId) {
+      console.error('No businessId provided');
+      setInitializing(false);
+      return;
+    }
+    
     async function initializeData() {
       try {
         // Fetch business details
         const businessResult = await client.models.Business.get({
-          id: businessId as string
+          id: businessId
         });
         
         if (businessResult.errors) {
@@ -123,32 +130,14 @@ export default function Dashboard({ route }: DashboardScreenProps) {
     { title: 'Settings', screen: 'Settings', icon: '⚙️' },
   ];
 
-  const navigateToScreen = (screenName: keyof RootStackParamList) => {
-    // Type-safe navigation based on the screen
-    switch (screenName) {
-      case 'ServiceManagement':
-      case 'ProductManagement':
-      case 'EmployeeManagement':
-      case 'Appointments':
-      case 'Customers':
-      case 'Reports':
-      case 'DataExport':
-      case 'Settings':
-        // Use type assertion to resolve the navigation type error
-        navigation.navigate(screenName as any, { businessId });
-        break;
-      case 'Orders':
-        navigation.navigate('OrderManagement', { businessId } as any);
-        break;
-      case 'Dashboard':
-        navigation.navigate(screenName, { businessId, businessName });
-        break;
-      case 'CustomerSelection':
-        navigation.navigate(screenName, { businessId, businessName });
-        break;
-      case 'BusinessCreate':
-        navigation.navigate(screenName);
-        break;
+  const navigateToScreen = (screenName: string) => {
+    if (screenName === 'OrderManagement') {
+      navigation.navigate('OrderManagement', { businessId });
+    } else if (screenName === 'Dashboard') {
+      navigation.navigate('Dashboard', { businessId });
+    } else {
+      // Handle other screens
+      Alert.alert('Navigation', `Would navigate to ${screenName}`);
     }
   };
 
@@ -171,7 +160,7 @@ export default function Dashboard({ route }: DashboardScreenProps) {
       {/* Start Transaction Button */}
       <TouchableOpacity 
         style={styles.startButton}
-        onPress={() => navigateToScreen('CustomerSelection')}
+        onPress={() => navigation.navigate('CustomerSelection', { businessId, businessName: business?.name })}
       >
         <Text style={styles.startButtonText}>Start Transaction</Text>
       </TouchableOpacity>
@@ -200,7 +189,7 @@ export default function Dashboard({ route }: DashboardScreenProps) {
             <TouchableOpacity
               key={index}
               style={styles.menuItem}
-              onPress={() => navigateToScreen(item.screen as keyof RootStackParamList)}
+              onPress={() => navigateToScreen(item.screen as string)}
             >
               <Text style={styles.menuIcon}>{item.icon}</Text>
               <Text style={styles.menuTitle}>{item.title}</Text>

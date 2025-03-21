@@ -133,7 +133,14 @@ export default function CheckoutScreen({ route, navigation }: CheckoutScreenProp
   };
   
   const handleCompleteCheckout = () => {
-    navigation.navigate('Dashboard', { businessId });
+    // Use reset to clear navigation history so user can't go back to checkout
+    navigation.reset({
+      index: 0,
+      routes: [{ 
+        name: 'CustomerSelection',
+        params: { businessId } 
+      }],
+    });
   };
   
   // Render receipt preview
@@ -219,7 +226,7 @@ export default function CheckoutScreen({ route, navigation }: CheckoutScreenProp
               style={styles.doneButton}
               onPress={handleCompleteCheckout}
             >
-              <Text style={styles.doneButtonText}>Return to Dashboard</Text>
+              <Text style={styles.doneButtonText}>Start New Order</Text>
             </TouchableOpacity>
           </View>
         </View>

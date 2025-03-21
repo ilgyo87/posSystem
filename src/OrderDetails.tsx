@@ -12,9 +12,10 @@ import {
   TextInput,
   Share,
   Platform,
-  Image
+  Image,
+  Button
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
 import { generateClient } from 'aws-amplify/data';
 import { uploadData, getUrl, remove } from 'aws-amplify/storage';
@@ -73,10 +74,23 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
   const [description, setDescription] = useState('');
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [qrCodesToPrint, setQrCodesToPrint] = useState<{qrCode: string, description: string}[]>([]);
+  const [processingMode, setProcessingMode] = useState(false);
+  const [completedGarments, setCompletedGarments] = useState<string[]>([]);
 
   useEffect(() => {
     fetchOrderDetails();
   }, [orderId]);
+
+  useEffect(() => {
+    if (order?.status === 'PROCESSING') {
+      setProcessingMode(true);
+    } else {
+      setProcessingMode(false);
+    }
+    
+    // We're removing the automatic redirection to RackAssignment so users
+    // can handle the order as needed without forced navigation
+  }, [order]);
 
   useEffect(() => {
     // Initialize counters when order items change
@@ -146,47 +160,167 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
 
   const handleBarcodeSubmit = async () => {
     if (!barcodeInput.trim()) return;
-
-    try {
-      // Create a new garment entry for any scanned code
-      const garmentResult = await client.models.Garment.create({
-        transactionItemID: orderItems[0].id, // Associate with first order item
-        qrCode: barcodeInput,
-        description: `Scanned Item ${scannedCount + 1}`,
-        status: 'IN_PROGRESS',
-        lastScanned: new Date().toISOString()
-      });
-
-      if (garmentResult.errors || !garmentResult.data) {
-        throw new Error('Failed to create garment');
-      }
-
-      const newGarment = garmentResult.data;
-      setGarments(prevGarments => [...prevGarments, newGarment]);
-      setScannedCount(prev => prev + 1);
-      setBarcodeInput('');
+    
+    if (processingMode && order?.status === 'PROCESSING') {
+      // Processing mode logic - fix scanning by improving the garment matching
+      console.log('Processing mode - scanning:', barcodeInput);
+      console.log('Available garments:', garments.map(g => ({ id: g.id, qrCode: g.qrCode, status: g.status })));
       
-      // Check if all garments are scanned
-      if (scannedCount + 1 >= totalGarments) {
-        // Update order status to Processing
-        if (order) {
-          const updateResult = await client.models.Transaction.update({
-            id: order.id,
-            status: ORDER_STATUSES.PROCESSING
-          });
-
-          if (updateResult.errors) {
-            console.error('Error updating order status:', updateResult.errors);
+      const matchingGarment = garments.find(
+        g => g.qrCode === barcodeInput.trim() && g.status !== 'COMPLETED'
+      );
+      
+      if (!matchingGarment) {
+        Alert.alert('Error', `No matching unprocessed garment found with ID: ${barcodeInput.trim()}`);
+        setBarcodeInput('');
+        return;
+      }
+      
+      try {
+        const updateResult = await client.models.Garment.update({
+          id: matchingGarment.id,
+          status: 'COMPLETED',
+          lastScanned: new Date().toISOString()
+        });
+        
+        if (updateResult.data) {
+          // Add to completed garments
+          setCompletedGarments(prev => [...prev, matchingGarment.id]);
+          
+          // Update local state
+          setGarments(prevGarments => 
+            prevGarments.map(g => g.id === matchingGarment.id ? updateResult.data! : g)
+          );
+          
+          setBarcodeInput('');
+          
+          // Check if all garments are now completed
+          const updatedGarments = [...garments];
+          const garmentIndex = updatedGarments.findIndex(g => g.id === matchingGarment.id);
+          if (garmentIndex >= 0 && updateResult.data) {
+            updatedGarments[garmentIndex] = updateResult.data;
+          }
+          
+          const allCompleted = updatedGarments.every(g => g.status === 'COMPLETED');
+          
+          if (allCompleted && order) {
+            // Update order status to CLEANED
+            try {
+              await client.models.Transaction.update({
+                id: order.id,
+                status: 'CLEANED'
+              });
+              
+              Alert.alert(
+                'Order Completed', 
+                'All garments have been processed. Order marked as CLEANED.',
+                [
+                  { 
+                    text: 'Assign to Rack', 
+                    onPress: () => navigation.navigate('RackAssignment', { 
+                      orderId: order.id,
+                      businessId: businessId 
+                    })
+                  },
+                  {
+                    text: 'Stay on Current Screen',
+                    style: 'cancel'
+                  }
+                ]
+              );
+            } catch (err) {
+              console.error('Error updating order status:', err);
+              Alert.alert('Error', 'Failed to update order status');
+            }
+          } else {
+            const remaining = garments.length - completedGarments.length - 1;
+            Alert.alert('Garment Processed', `Successfully processed garment. ${remaining} garment(s) remaining.`);
           }
         }
-
-        Alert.alert('Success', 'All garments have been scanned! Order status updated to Processing.', [
-          { text: 'OK', onPress: () => navigation.goBack() }
-        ]);
+      } catch (err) {
+        console.error('Error updating garment status:', err);
+        Alert.alert('Error', 'Failed to update garment status');
       }
-    } catch (error) {
-      console.error('Error processing barcode:', error);
-      Alert.alert('Error', 'Failed to process barcode');
+    } else {
+      // Original barcode handling for non-processing mode
+      try {
+        if (!orderItems || orderItems.length === 0) {
+          Alert.alert('Error', 'No order items found');
+          return;
+        }
+        
+        // Check if this barcode already exists to maintain uniqueness
+        const barcodeExists = garments.some(g => g.qrCode === barcodeInput.trim());
+        if (barcodeExists) {
+          Alert.alert('Duplicate', `Item with barcode ${barcodeInput.trim()} has already been added`);
+          setBarcodeInput('');
+          return;
+        }
+        
+        // Check if barcode exists in ANY other order
+        try {
+          const existingGarmentsResult = await client.models.Garment.list({
+            filter: { qrCode: { eq: barcodeInput.trim() } }
+          });
+          
+          if (existingGarmentsResult.data && existingGarmentsResult.data.length > 0) {
+            // Found the same barcode in the database
+            const existingGarment = existingGarmentsResult.data[0];
+            
+            // Get the order details to show which order it belongs to
+            const existingOrderResult = await client.models.TransactionItem.get({
+              id: existingGarment.transactionItemID
+            });
+            
+            if (existingOrderResult.data) {
+              const orderInfoResult = await client.models.Transaction.get({
+                id: existingOrderResult.data.transactionID
+              });
+              
+              let orderInfo = "";
+              if (orderInfoResult.data) {
+                const orderId = orderInfoResult.data.id.substring(0, 8);
+                const customerName = orderInfoResult.data.customerID || 'Unknown';
+                orderInfo = `Order #${orderId} (Customer: ${customerName})`;
+              }
+              
+              Alert.alert(
+                'Barcode Already Used',
+                `This barcode has already been scanned for ${orderInfo}. Do you still want to use it?`,
+                [
+                  {
+                    text: 'Cancel',
+                    style: 'cancel',
+                    onPress: () => setBarcodeInput('')
+                  },
+                  {
+                    text: 'Use Anyway',
+                    onPress: () => {
+                      // Show description modal for the scanned item
+                      setCurrentBarcode(barcodeInput);
+                      setShowDescriptionModal(true);
+                      setSelectedItem(orderItems[0]);
+                    }
+                  }
+                ]
+              );
+              return;
+            }
+          }
+        } catch (error) {
+          console.error('Error checking barcode uniqueness:', error);
+          // Continue with normal flow if there's an error checking
+        }
+        
+        // Show description modal for the scanned item
+        setCurrentBarcode(barcodeInput);
+        setShowDescriptionModal(true);
+        setSelectedItem(orderItems[0]);
+        
+      } catch (error) {
+        console.error('Error processing barcode:', error);
+        Alert.alert('Error', 'Failed to process barcode');
+      }
     }
   };
 
@@ -208,11 +342,49 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
 
       const newGarment = garmentResult.data;
       setGarments(prevGarments => [...prevGarments, newGarment]);
-      setScannedCount(prev => prev + 1);
+      
+      const newScannedCount = scannedCount + 1;
+      setScannedCount(newScannedCount);
+      
       setShowDescriptionModal(false);
       setDescription('');
       setCurrentBarcode('');
       setBarcodeInput('');
+      
+      // Check if all items are scanned - update order status and navigate
+      if (newScannedCount >= totalGarments && totalGarments > 0 && order) {
+        try {
+          // Update order status to PROCESSING
+          await client.models.Transaction.update({
+            id: order.id,
+            status: 'PROCESSING'
+          });
+          
+          Alert.alert(
+            'All Items Scanned', 
+            'All items have been scanned. Order status changed to PROCESSING.',
+            [
+              { 
+                text: 'Start New Order', 
+                onPress: () => navigation.reset({
+                  index: 0,
+                  routes: [{ 
+                    name: 'CustomerSelection',
+                    params: { businessId } 
+                  }],
+                })
+              },
+              {
+                text: 'Stay on Current Screen',
+                style: 'cancel'
+              }
+            ]
+          );
+        } catch (err) {
+          console.error('Error updating order status:', err);
+          Alert.alert('Error', 'Failed to update order status to PROCESSING');
+        }
+      }
     } catch (error) {
       console.error('Error saving garment:', error);
       Alert.alert('Error', 'Failed to save garment');
@@ -697,88 +869,154 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
 
   return (
     <View style={styles.container}>
-      {/* Barcode Input Section */}
-      <View style={styles.barcodeSection}>
-        <TextInput
-          style={styles.barcodeInput}
-          placeholder="Scan or enter barcode"
-          value={barcodeInput}
-          onChangeText={setBarcodeInput}
-          onSubmitEditing={handleBarcodeSubmit}
-          autoFocus
-        />
+      <View style={styles.header}>
+        <Text style={styles.title}>Order Details</Text>
         <TouchableOpacity 
-          style={styles.scanButton}
-          onPress={() => setShowScanModal(true)}
+          style={styles.dashboardButton}
+          onPress={() => navigation.reset({
+            index: 0,
+            routes: [{ name: 'Dashboard', params: { businessId } }],
+          })}
         >
-          <Text style={styles.scanButtonText}>Scan</Text>
+          <Text style={styles.dashboardButtonText}>Dashboard</Text>
         </TouchableOpacity>
       </View>
+      
+      {processingMode ? (
+        <>
+          <Text style={styles.sectionTitle}>Process Garments</Text>
+          <Text>Scan each garment to mark it as processed</Text>
+          <Text>Completed: {completedGarments.length} / {garments.length}</Text>
+          
+          <View style={styles.barcodeContainer}>
+            <TextInput
+              style={styles.input}
+              value={barcodeInput}
+              onChangeText={setBarcodeInput}
+              placeholder="Scan or enter garment ID"
+              keyboardType="default"
+              autoCapitalize="none"
+              onSubmitEditing={handleBarcodeSubmit}
+            />
+            <Button title="Process" onPress={handleBarcodeSubmit} />
+          </View>
+          
+          <FlatList
+            data={garments}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item }) => (
+              <View style={[
+                styles.garmentItem, 
+                item.status === 'COMPLETED' ? styles.completedItem : {}
+              ]}>
+                <Text>Garment ID: {item.qrCode}</Text>
+                <Text>Description: {item.description}</Text>
+                <Text>Status: {item.status}</Text>
+              </View>
+            )}
+          />
+        </>
+      ) : (
+        <>
+          {/* Barcode Input Section */}
+          <View style={styles.barcodeSection}>
+            <TextInput
+              style={styles.barcodeInput}
+              placeholder="Scan or enter barcode"
+              value={barcodeInput}
+              onChangeText={setBarcodeInput}
+              onSubmitEditing={handleBarcodeSubmit}
+              autoFocus
+            />
+            <TouchableOpacity 
+              style={styles.scanButton}
+              onPress={() => setShowScanModal(true)}
+            >
+              <Text style={styles.scanButtonText}>Scan</Text>
+            </TouchableOpacity>
+          </View>
+          
+          {/* Order Summary Section */}
+          {order && (
+            <View style={styles.summarySection}>
+              <Text style={styles.orderNumber}>Order #{order.id.substring(0, 8)}</Text>
+              <Text style={styles.customerName}>Customer: {order.customerID || 'N/A'}</Text>
+              <Text style={styles.garmentCount}>
+                Garments: {scannedCount} / {totalGarments}
+              </Text>
+              
+              {/* Rack Assignment Button for CLEANED orders */}
+              {order.status === 'CLEANED' && (
+                <TouchableOpacity 
+                  style={styles.rackButton}
+                  onPress={() => navigation.navigate('RackAssignment', {
+                    orderId: orderId,
+                    businessId: businessId
+                  })}
+                >
+                  <Text style={styles.rackButtonText}>Assign to Rack</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
 
-      {/* Order Summary Section */}
-      <View style={styles.summarySection}>
-        <Text style={styles.orderNumber}>Order #{order.id.substring(0, 8)}</Text>
-        <Text style={styles.customerName}>Customer: {order.customerID || 'N/A'}</Text>
-        <Text style={styles.garmentCount}>
-          Garments: {scannedCount} / {totalGarments}
-        </Text>
-      </View>
+          {/* Order Notes Section */}
+          {order?.customerNotes && (
+            <View style={styles.notesSection}>
+              <Text style={styles.notesTitle}>Order Notes</Text>
+              <ScrollView style={styles.notesContainer}>
+                <Text style={styles.notesText}>{order.customerNotes}</Text>
+              </ScrollView>
+            </View>
+          )}
 
-      {/* Order Notes Section */}
-      {order.customerNotes && (
-        <View style={styles.notesSection}>
-          <Text style={styles.notesTitle}>Order Notes</Text>
-          <ScrollView style={styles.notesContainer}>
-            <Text style={styles.notesText}>{order.customerNotes}</Text>
-          </ScrollView>
-        </View>
+          {/* Main Content */}
+          <View style={styles.mainContent}>
+            {/* Order Items Section */}
+            <View style={styles.orderItemsSection}>
+              <Text style={styles.sectionTitle}>Order Items</Text>
+              <FlatList
+                data={orderItems}
+                renderItem={renderOrderItem}
+                keyExtractor={item => item.id}
+                style={styles.itemsList}
+                numColumns={2}
+                columnWrapperStyle={styles.columnWrapper}
+              />
+            </View>
+
+            {/* Scanned Items Section */}
+            <View style={styles.scannedSection}>
+              <Text style={styles.sectionTitle}>Scanned Items</Text>
+              <FlatList
+                data={garments.filter(g => g.status === 'IN_PROGRESS')}
+                renderItem={renderScannedItem}
+                keyExtractor={item => item.id}
+                style={styles.scannedList}
+                ListEmptyComponent={
+                  <Text style={styles.emptyText}>No items scanned yet</Text>
+                }
+              />
+            </View>
+          </View>
+        </>
       )}
 
-      {/* Main Content */}
-      <View style={styles.mainContent}>
-        {/* Order Items Section */}
-        <View style={styles.orderItemsSection}>
-          <Text style={styles.sectionTitle}>Order Items</Text>
-          <FlatList
-            data={orderItems}
-            renderItem={renderOrderItem}
-            keyExtractor={item => item.id}
-            style={styles.itemsList}
-            numColumns={2}
-            columnWrapperStyle={styles.columnWrapper}
-          />
-        </View>
-
-        {/* Scanned Items Section */}
-        <View style={styles.scannedSection}>
-          <Text style={styles.sectionTitle}>Scanned Items</Text>
-          <FlatList
-            data={garments.filter(g => g.status === 'IN_PROGRESS')}
-            renderItem={renderScannedItem}
-            keyExtractor={item => item.id}
-            style={styles.scannedList}
-            ListEmptyComponent={
-              <Text style={styles.emptyText}>No items scanned yet</Text>
-            }
-          />
-        </View>
-      </View>
-
-      {/* Edit Garment Modal */}
+      {/* Description Modal */}
       <Modal
-        visible={showEditModal}
+        visible={showDescriptionModal}
         animationType="slide"
         transparent={true}
       >
         <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Add Garment Details</Text>
+            <Text style={styles.modalTitle}>Enter Item Description</Text>
             
             <TextInput
-              style={styles.input}
+              style={styles.modalInput}
               placeholder="Enter garment description"
-              value={editDescription}
-              onChangeText={setEditDescription}
+              value={description}
+              onChangeText={setDescription}
               multiline
             />
             
@@ -786,20 +1024,20 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
               <TouchableOpacity 
                 style={[styles.modalButton, styles.cancelButton]}
                 onPress={() => {
-                  setShowEditModal(false);
-                  setEditDescription('');
-                  setEditingGarment(null);
+                  setShowDescriptionModal(false);
+                  setDescription('');
+                  setCurrentBarcode('');
                 }}
               >
-                <Text style={styles.modalButtonText}>Cancel</Text>
+                <Text style={styles.cancelButtonText}>Cancel</Text>
               </TouchableOpacity>
               
               <TouchableOpacity 
                 style={[styles.modalButton, styles.confirmButton]}
-                onPress={handleSaveGarment}
-                disabled={!editDescription.trim()}
+                onPress={handleSaveDescription}
+                disabled={!description.trim()}
               >
-                <Text style={styles.modalButtonText}>Save</Text>
+                <Text style={styles.cancelButtonText}>Save</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -825,143 +1063,6 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
           </View>
         </View>
       </Modal>
-
-      {/* Adjustment Modal */}
-      <Modal
-        visible={showAdjustModal}
-        animationType="slide"
-        transparent={true}
-      >
-        <View style={styles.modalContainer}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Adjust Quantity</Text>
-            <Text style={styles.modalSubtitle}>
-              {adjustingItem?.name} - Current quantity: {adjustingItem?.quantity}
-            </Text>
-            
-            <TextInput
-              style={styles.input}
-              placeholder="Enter reason for adjustment"
-              value={adjustmentReason}
-              onChangeText={setAdjustmentReason}
-              multiline
-            />
-            
-            <View style={styles.modalButtons}>
-              <TouchableOpacity 
-                style={[styles.modalButton, styles.cancelButton]}
-                onPress={() => {
-                  setShowAdjustModal(false);
-                  setAdjustingItem(null);
-                  setAdjustmentReason('');
-                }}
-              >
-                <Text style={styles.modalButtonText}>Cancel</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={[styles.modalButton, styles.confirmButton]}
-                onPress={handleAdjustmentSubmit}
-                disabled={!adjustmentReason.trim()}
-              >
-                <Text style={styles.modalButtonText}>Confirm</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Description Modal */}
-      <Modal
-        visible={showDescriptionModal}
-        animationType="slide"
-        transparent={true}
-      >
-        <View style={styles.modalContainer}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Enter Item Description</Text>
-            
-            <TextInput
-              style={styles.input}
-              placeholder="Enter garment description"
-              value={description}
-              onChangeText={setDescription}
-              multiline
-            />
-            
-            <View style={styles.modalButtons}>
-              <TouchableOpacity 
-                style={[styles.modalButton, styles.cancelButton]}
-                onPress={() => {
-                  setShowDescriptionModal(false);
-                  setDescription('');
-                  setCurrentBarcode('');
-                }}
-              >
-                <Text style={styles.modalButtonText}>Cancel</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={[styles.modalButton, styles.confirmButton]}
-                onPress={handleSaveDescription}
-                disabled={!description.trim()}
-              >
-                <Text style={styles.modalButtonText}>Save</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Print Modal */}
-      <Modal
-        visible={showPrintModal}
-        animationType="slide"
-        transparent={true}
-      >
-        <View style={styles.modalContainer}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>QR Code Preview</Text>
-            <Text style={styles.modalSubtitle}>
-              {qrCodesToPrint.length} QR codes generated
-            </Text>
-            
-            <View style={styles.qrPreviewContainer}>
-              {qrCodesToPrint.slice(0, 4).map(({ qrCode, description }, index) => (
-                <View key={index} style={styles.qrPreviewItem}>
-                  <QRCode
-                    value={qrCode}
-                    size={100}
-                  />
-                  <Text style={styles.qrPreviewDescription}>{description}</Text>
-                </View>
-              ))}
-              {qrCodesToPrint.length > 4 && (
-                <Text style={styles.qrPreviewMore}>
-                  +{qrCodesToPrint.length - 4} more...
-                </Text>
-              )}
-            </View>
-            
-            <View style={styles.modalButtons}>
-              <TouchableOpacity 
-                style={[styles.modalButton, styles.printButton]}
-                onPress={handlePrint}
-              >
-                <Text style={styles.modalButtonText}>Print</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.modalButton, styles.cancelButton]}
-                onPress={() => {
-                  setShowPrintModal(false);
-                }}
-              >
-                <Text style={styles.modalButtonText}>Close</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }
@@ -970,6 +1071,28 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f8f9fa',
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    backgroundColor: '#fff',
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  dashboardButton: {
+    backgroundColor: '#2196F3',
+    padding: 8,
+    borderRadius: 4,
+  },
+  dashboardButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '500',
   },
   barcodeSection: {
     flexDirection: 'row',
@@ -1033,8 +1156,32 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     color: '#333',
-    padding: 8,
+    padding: 16,
     backgroundColor: '#f8f9fa',
+  },
+  barcodeContainer: {
+    flexDirection: 'row',
+    padding: 16,
+    backgroundColor: '#fff',
+  },
+  input: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 4,
+    padding: 12,
+    marginRight: 8,
+    fontSize: 16,
+  },
+  garmentItem: {
+    backgroundColor: '#fff',
+    padding: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  completedItem: {
+    backgroundColor: '#e6ffe6',
+    opacity: 0.7
   },
   itemsList: {
     backgroundColor: '#fff',
@@ -1110,39 +1257,31 @@ const styles = StyleSheet.create({
     minWidth: 40,
     textAlign: 'center',
   },
-  printButton: {
-    backgroundColor: '#4CAF50',
-  },
-  printButtonText: {
-    color: '#fff',
+  emptyText: {
     textAlign: 'center',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  adjustControls: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  adjustCounter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  adjustButton: {
-    backgroundColor: '#2196F3',
+    color: '#666',
     padding: 8,
-    borderRadius: 4,
-    minWidth: 80,
-    marginLeft: 8,
-  },
-  adjustButtonText: {
-    color: '#fff',
-    textAlign: 'center',
     fontSize: 14,
-    fontWeight: '500',
   },
-  buttonDisabled: {
-    opacity: 0.5,
+  notesSection: {
+    backgroundColor: '#fff',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eaeaea',
+  },
+  notesTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 8,
+  },
+  notesContainer: {
+    maxHeight: 150,
+  },
+  notesText: {
+    fontSize: 14,
+    color: '#666',
+    lineHeight: 20,
   },
   loadingContainer: {
     flex: 1,
@@ -1150,97 +1289,44 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   loadingText: {
-    marginTop: 12,
     fontSize: 16,
     color: '#666',
-  },
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 16,
-  },
-  errorText: {
-    fontSize: 18,
-    color: '#F44336',
-    marginBottom: 20,
-  },
-  backButton: {
-    backgroundColor: '#2196F3',
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 4,
-  },
-  backButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  modalContainer: {
-    flex: 1,
-    backgroundColor: '#000',
-  },
-  modalContent: {
-    flex: 1,
-    backgroundColor: '#fff',
-    margin: 16,
-    borderRadius: 8,
-    padding: 16,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 16,
-    textAlign: 'center',
-  },
-  modalSubtitle: {
-    fontSize: 16,
-    color: '#666',
-    marginBottom: 16,
-    textAlign: 'center',
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 4,
-    padding: 12,
-    marginBottom: 16,
-    fontSize: 16,
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  modalButton: {
-    flex: 1,
-    padding: 12,
-    borderRadius: 4,
-    marginHorizontal: 8,
+    marginTop: 16,
   },
   cancelButton: {
     backgroundColor: '#f44336',
+    padding: 8,
+    borderRadius: 4,
+    minWidth: 80,
   },
-  confirmButton: {
-    backgroundColor: '#4CAF50',
-  },
-  modalButtonText: {
+  cancelButtonText: {
     color: '#fff',
     textAlign: 'center',
     fontWeight: '500',
   },
   scannedItem: {
     backgroundColor: '#fff',
-    padding: 8,
+    padding: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
-  },
-  scannedItemContent: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  scannedItemInfo: {
+  scannedInfo: {
     flex: 1,
+  },
+  scannedId: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+  },
+  scannedDesc: {
+    fontSize: 14,
+    color: '#666',
+  },
+  existingCount: {
+    fontSize: 12,
   },
   imageActions: {
     marginLeft: 8,
@@ -1281,68 +1367,135 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#666',
   },
-  emptyText: {
-    textAlign: 'center',
-    color: '#666',
+  printButton: {
+    backgroundColor: '#4CAF50',
     padding: 8,
-    fontSize: 14,
+    borderRadius: 4,
+    minWidth: 80,
+    marginLeft: 8,
   },
-  qrPreviewContainer: {
+  printButtonText: {
+    color: '#fff',
+    textAlign: 'center',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  buttonDisabled: {
+    opacity: 0.5,
+  },
+  adjustControls: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    alignItems: 'center',
+  },
+  adjustCounter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  adjustButton: {
+    backgroundColor: '#2196F3',
+    padding: 8,
+    borderRadius: 4,
+    minWidth: 80,
+    marginLeft: 8,
+  },
+  adjustButtonText: {
+    color: '#fff',
+    textAlign: 'center',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  errorContainer: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 16,
   },
-  qrPreviewItem: {
-    alignItems: 'center',
-    margin: 8,
-    padding: 8,
-    backgroundColor: '#fff',
+  errorText: {
+    fontSize: 18,
+    color: '#F44336',
+    marginBottom: 20,
+  },
+  backButton: {
+    backgroundColor: '#2196F3',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
     borderRadius: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
   },
-  qrPreviewDescription: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 4,
+  backButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  scannedItemContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  scannedItemInfo: {
+    flex: 1,
+  },
+  modalContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    padding: 20,
+    borderRadius: 10,
+    width: '80%',
+    maxHeight: '80%',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 16,
+  },
+  modalInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 4,
+    padding: 12,
+    marginBottom: 16,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  modalButton: {
+    padding: 8,
+    borderRadius: 4,
+    minWidth: 80,
+    alignItems: 'center',
+  },
+  confirmButton: {
+    backgroundColor: '#4CAF50',
+    padding: 8,
+    borderRadius: 4,
+    minWidth: 80,
+  },
+  rackButton: {
+    backgroundColor: '#2196F3',
+    padding: 12,
+    borderRadius: 4,
+    marginTop: 16,
+    alignItems: 'center',
+  },
+  rackButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '500',
     textAlign: 'center',
-    maxWidth: 100,
   },
-  qrPreviewMore: {
-    fontSize: 14,
-    color: '#666',
-    textAlign: 'center',
-    marginTop: 8,
-  },
-  notesSection: {
+  orderInfo: {
     backgroundColor: '#fff',
     padding: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#eaeaea',
-  },
-  notesTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 8,
-  },
-  notesContainer: {
-    maxHeight: 150,
-  },
-  notesText: {
-    fontSize: 14,
-    color: '#666',
-    lineHeight: 20,
-  },
-  existingCount: {
-    fontSize: 12,
-    color: '#666',
-    textAlign: 'center',
-    marginTop: 4,
   },
 });

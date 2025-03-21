@@ -30,6 +30,7 @@ type OrderManagementScreenProps = NativeStackScreenProps<RootStackParamList, 'Or
 const ORDER_STATUSES = {
   PENDING: 'Pending',
   PROCESSING: 'Processing',
+  CLEANED: 'Cleaned',
   COMPLETED: 'Completed',
   CANCELLED: 'Cancelled'
 };
@@ -58,7 +59,7 @@ export default function OrderManagement({ route }: OrderManagementScreenProps) {
     });
     
     return unsubscribe;
-  }, [businessId]);
+  }, [businessId, filterStatus]);
 
   const fetchOrders = async () => {
     try {
@@ -77,6 +78,8 @@ export default function OrderManagement({ route }: OrderManagementScreenProps) {
         console.error('Error fetching orders:', ordersResult.errors);
         Alert.alert('Error', 'Failed to fetch orders');
       } else {
+        // Log to debug status values
+        console.log('Order statuses:', sortedOrders.map(order => order.status));
         setOrders(sortedOrders);
       }
     } catch (error) {
@@ -213,11 +216,14 @@ export default function OrderManagement({ route }: OrderManagementScreenProps) {
       const matchesSearch = 
         searchQuery === '' || 
         // Use ID instead of orderNumber since it doesn't exist in the model
-        order.id.toLowerCase().includes(searchQuery.toLowerCase());
+        order.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (order.customerID && order.customerID.toLowerCase().includes(searchQuery.toLowerCase()));
         
+      // Make the status comparison case-insensitive
+      const orderStatus = order.status || '';
       const matchesStatus = 
         filterStatus === '' || 
-        order.status === filterStatus;
+        orderStatus.toUpperCase() === filterStatus;
         
       return matchesSearch && matchesStatus;
     });
@@ -228,7 +234,39 @@ export default function OrderManagement({ route }: OrderManagementScreenProps) {
     return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
   };
 
+  const getOrderCounts = () => {
+    const counts = {
+      ALL: orders.length,
+      PENDING: 0,
+      PROCESSING: 0,
+      CLEANED: 0,
+      COMPLETED: 0,
+      CANCELLED: 0
+    };
+    
+    orders.forEach(order => {
+      const status = order.status ? order.status.toUpperCase() : '';
+      if (counts[status as keyof typeof counts] !== undefined) {
+        counts[status as keyof typeof counts]++;
+      } else {
+        console.log('Unknown status:', order.status);
+      }
+    });
+    
+    return counts;
+  };
+
+  const orderCounts = getOrderCounts();
+
+  const handleFilterByStatus = (status: string) => {
+    setFilterStatus(status);
+    console.log(`Filtering by status: ${status}`);
+  }
+
   const renderOrderItem = ({ item }: { item: Schema['Transaction']['type'] }) => {
+    const status = item.status ? item.status.toUpperCase() : 'PENDING';
+    const displayStatus = ORDER_STATUSES[status as keyof typeof ORDER_STATUSES] || status;
+    
     return (
       <TouchableOpacity 
         style={styles.orderItem}
@@ -240,13 +278,14 @@ export default function OrderManagement({ route }: OrderManagementScreenProps) {
             styles.orderStatus,
             { 
               color: 
-                item.status === 'COMPLETED' ? '#4CAF50' :
-                item.status === 'CANCELLED' ? '#F44336' :
-                item.status === 'PROCESSING' ? '#2196F3' : 
+                status === 'COMPLETED' ? '#4CAF50' :
+                status === 'CANCELLED' ? '#F44336' :
+                status === 'PROCESSING' ? '#2196F3' :
+                status === 'CLEANED' ? '#9C27B0' :
                 '#FFC107'
             }
           ]}>
-            {item.status}
+            {displayStatus}
           </Text>
         </View>
         
@@ -300,9 +339,12 @@ export default function OrderManagement({ route }: OrderManagementScreenProps) {
               styles.filterOption,
               filterStatus === '' && styles.filterOptionActive
             ]}
-            onPress={() => setFilterStatus('')}
+            onPress={() => handleFilterByStatus('')}
           >
-            <Text style={styles.filterOptionText}>All</Text>
+            <Text style={[
+              styles.filterOptionText,
+              filterStatus === '' && styles.filterOptionTextActive
+            ]}>All ({orderCounts.ALL})</Text>
           </TouchableOpacity>
           
           {Object.entries(ORDER_STATUSES).map(([key, value]) => (
@@ -312,9 +354,12 @@ export default function OrderManagement({ route }: OrderManagementScreenProps) {
                 styles.filterOption,
                 filterStatus === key && styles.filterOptionActive
               ]}
-              onPress={() => setFilterStatus(key)}
+              onPress={() => handleFilterByStatus(key)}
             >
-              <Text style={styles.filterOptionText}>{value}</Text>
+              <Text style={[
+                styles.filterOptionText,
+                filterStatus === key && styles.filterOptionTextActive
+              ]}>{value} ({orderCounts[key as keyof typeof orderCounts] || 0})</Text>
             </TouchableOpacity>
           ))}
         </View>
@@ -330,14 +375,18 @@ export default function OrderManagement({ route }: OrderManagementScreenProps) {
           {getFilteredOrders().length === 0 ? (
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyText}>
-                No orders found
+                {filterStatus 
+                  ? `No orders with status "${ORDER_STATUSES[filterStatus as keyof typeof ORDER_STATUSES] || filterStatus}" found` 
+                  : "No orders found"}
               </Text>
-              <TouchableOpacity
-                style={styles.createButton}
-                onPress={() => navigation.navigate('CustomerSelection', { businessId })}
-              >
-                <Text style={styles.createButtonText}>Create New Order</Text>
-              </TouchableOpacity>
+              {filterStatus === '' && (
+                <TouchableOpacity
+                  style={styles.createButton}
+                  onPress={() => navigation.navigate('CustomerSelection', { businessId })}
+                >
+                  <Text style={styles.createButtonText}>Create New Order</Text>
+                </TouchableOpacity>
+              )}
             </View>
           ) : (
             <FlatList
@@ -503,21 +552,24 @@ const styles = StyleSheet.create({
   },
   filterLabel: {
     fontSize: 16,
-    fontWeight: '500',
-    marginBottom: 8,
+    fontWeight: '600',
+    marginBottom: 12,
     color: '#333',
   },
   filterOptions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    justifyContent: 'space-between',
   },
   filterOption: {
     backgroundColor: '#f1f1f1',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 16,
-    marginRight: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 20,
+    marginRight: 6,
     marginBottom: 8,
+    minWidth: 80,
+    alignItems: 'center',
   },
   filterOptionActive: {
     backgroundColor: '#2196F3',
@@ -525,6 +577,11 @@ const styles = StyleSheet.create({
   filterOptionText: {
     color: '#333',
     fontSize: 14,
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+  filterOptionTextActive: {
+    color: '#fff',
   },
   loadingContainer: {
     flex: 1,
