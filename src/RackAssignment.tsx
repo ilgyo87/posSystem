@@ -95,29 +95,15 @@ export default function RackAssignment({ route }: RackAssignmentScreenProps) {
       const updateResult = await client.models.Transaction.update({
         id: order.id,
         status: 'COMPLETED',
-        customerNotes: `${order.customerNotes || ''}\n[${new Date().toLocaleString()}] ${isReassigning ? 'Reassigned' : 'Placed'} on rack: ${rackScanInput}`
+        customerNotes: `${order.customerNotes || ''}\n[${new Date().toLocaleString()}] Status changed: CLEANED → COMPLETED\n[${new Date().toLocaleString()}] ${isReassigning ? 'Reassigned' : 'Placed'} on rack: ${rackScanInput}`
       });
       
       if (updateResult.errors) {
         throw new Error('Failed to update order');
       }
       
-      Alert.alert(
-        'Order Completed', 
-        `Order has been ${isReassigning ? 'reassigned' : 'placed'} on rack ${rackScanInput} and marked as completed`,
-        [
-          { 
-            text: 'Start New Order', 
-            onPress: () => navigation.reset({
-              index: 0,
-              routes: [{ 
-                name: 'CustomerSelection',
-                params: { businessId } 
-              }],
-            })
-          }
-        ]
-      );
+      // Navigate directly to OrderManagement screen without showing notification
+      navigation.navigate('OrderManagement', { businessId });
     } catch (error) {
       console.error('Error assigning rack:', error);
       Alert.alert('Error', 'Failed to complete the order');

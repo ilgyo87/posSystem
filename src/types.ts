@@ -11,6 +11,7 @@ export type RootStackParamList = {
   BusinessSetup: undefined;
   GarmentTypes: { businessId: string };
   RackAssignment: { orderId: string; businessId: string };
+  CompletedOrderDetails: { orderId: string; businessId: string };
   Checkout: { 
     businessId: string; 
     customerId: string; 

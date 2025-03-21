@@ -44,6 +44,8 @@ export default function CustomerSelection({ route, navigation }: CustomerSelecti
   const [lastName, setLastName] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [email, setEmail] = useState('');
+  
+  // Navigation is now handled by the header button in App.tsx
 
   useEffect(() => {
     fetchCustomers();
@@ -109,12 +111,25 @@ export default function CustomerSelection({ route, navigation }: CustomerSelecti
       if (result.errors) {
         Alert.alert('Error creating customer', JSON.stringify(result.errors));
       } else {
-        Alert.alert('Success', 'Customer created successfully');
+        // Skip notification and navigate directly to ProductSelection
+        const newCustomer = result.data;
         // Reset form and close modal
         resetForm();
         setModalVisible(false);
-        // Refresh customer list
-        fetchCustomers();
+        
+        // Navigate to ProductSelection with the new customer
+        if (newCustomer) {
+          navigation.navigate('ProductSelection', {
+            businessId,
+            customerId: newCustomer.id,
+            customerName: `${newCustomer.firstName} ${newCustomer.lastName}`
+          });
+        } else {
+          // This shouldn't happen, but just in case
+          console.error('Customer created but data is null');
+          // Refresh customer list as fallback
+          fetchCustomers();
+        }
       }
     } catch (error: any) {
       console.error('Error creating customer:', error);
@@ -299,6 +314,17 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 16,
+  },
+  backButton: {
+    backgroundColor: '#2196F3',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 4,
+    marginRight: 10,
+  },
+  backButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
   },
   title: {
     fontSize: 24,

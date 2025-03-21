@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -74,6 +74,9 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
   const [description, setDescription] = useState('');
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [qrCodesToPrint, setQrCodesToPrint] = useState<{qrCode: string, description: string}[]>([]);
+  
+  // Reference to the barcode input field for auto-focusing
+  const barcodeInputRef = useRef<TextInput>(null);
   const [processingMode, setProcessingMode] = useState(false);
   const [completedGarments, setCompletedGarments] = useState<string[]>([]);
 
@@ -92,19 +95,162 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
     // can handle the order as needed without forced navigation
   }, [order]);
 
+  // Group order items by service type - simple approach
+  const groupedOrderItems = React.useMemo(() => {
+    // Create a map to store services and their items
+    const serviceMap: { [key: string]: Schema['TransactionItem']['type'][] } = {};
+    
+    // Group all items by their name
+    // This is the simplest approach that will work with any data structure
+    orderItems.forEach(item => {
+      const name = item.name || 'Unknown';
+      
+      if (!serviceMap[name]) {
+        serviceMap[name] = [];
+      }
+      
+      serviceMap[name].push(item);
+    });
+    
+    return serviceMap;
+  }, [orderItems]);
+  
+  // State to store services from the database
+  const [services, setServices] = React.useState<Schema['Service']['type'][]>([]);
+  
+  // Fetch services from the database
+  React.useEffect(() => {
+    const fetchServices = async () => {
+      try {
+        // Get business ID from the order
+        const businessID = order?.businessID;
+        if (!businessID) return;
+        
+        // Fetch services for this business
+        const servicesResult = await client.models.Service.list({
+          filter: { businessID: { eq: businessID } }
+        });
+        
+        if (servicesResult.data) {
+          setServices(servicesResult.data);
+          console.log('Fetched services:', servicesResult.data.map(s => s.name));
+        }
+      } catch (error) {
+        console.error('Error fetching services:', error);
+      }
+    };
+    
+    fetchServices();
+  }, [order]);
+  
+  // Create service categories based on the services in the database
+  const serviceCategories = React.useMemo(() => {
+    // Create a map to store services and their items
+    const result: { [key: string]: Schema['TransactionItem']['type'][] } = {};
+    
+    // If we have services from the database, use those
+    if (services.length > 0) {
+      // Initialize each service category with an empty array
+      services.forEach(service => {
+        if (service.name) {
+          result[service.name] = [];
+        }
+      });
+      
+      // Add 'Other Services' category
+      result['Other Services'] = [];
+      
+      // Distribute order items to the appropriate service category
+      orderItems.forEach(item => {
+        // Try to find a matching service by ID first
+        if ((item as any).serviceID) {
+          const matchingService = services.find(s => s.id === (item as any).serviceID);
+          if (matchingService && matchingService.name) {
+            result[matchingService.name].push(item);
+            return;
+          }
+        }
+        
+        // Then try to match by serviceType
+        if ((item as any).serviceType) {
+          const serviceType = (item as any).serviceType;
+          const matchingService = services.find(s => s.name === serviceType);
+          if (matchingService && matchingService.name) {
+            result[matchingService.name].push(item);
+            return;
+          }
+        }
+        
+        // Finally, try to match by name
+        let matched = false;
+        for (const service of services) {
+          if (service.name && item.name && item.name.includes(service.name)) {
+            result[service.name].push(item);
+            matched = true;
+            break;
+          }
+        }
+        
+        // If no match was found, add to 'Other Services'
+        if (!matched) {
+          result['Other Services'].push(item);
+        }
+      });
+    } else {
+      // If we don't have services from the database, use the order items
+      // Group by serviceType or name
+      orderItems.forEach(item => {
+        const key = (item as any).serviceType || item.name || 'Other Services';
+        
+        if (!result[key]) {
+          result[key] = [];
+        }
+        
+        result[key].push(item);
+      });
+    }
+    
+    // Remove empty categories
+    Object.keys(result).forEach(key => {
+      if (result[key].length === 0) {
+        delete result[key];
+      }
+    });
+    
+    return result;
+  }, [orderItems, services]);
+  
+  // For displaying order items, we'll use the original groupedOrderItems
+  // But we'll modify the renderServiceItem function to only show service categories
+  
+  // We'll use the original groupedOrderItems directly
+  // No need for additional filtering
+  
+  // Calculate total quantities for each service
+  const serviceTotals = React.useMemo(() => {
+    const totals: { [key: string]: number } = {};
+    
+    Object.entries(groupedOrderItems).forEach(([serviceName, items]) => {
+      totals[serviceName] = items.reduce((sum, item) => sum + Number(item.quantity), 0);
+    });
+    
+    return totals;
+  }, [groupedOrderItems]);
+  
   useEffect(() => {
     // Initialize counters when order items change
     const initialQrQuantities: {[key: string]: string} = {};
     const initialAdjustQuantities: {[key: string]: string} = {};
     
-    orderItems.forEach(item => {
-      initialQrQuantities[item.id] = item.quantity.toString();
-      initialAdjustQuantities[item.id] = item.quantity.toString();
+    // Use service names as keys instead of individual item IDs
+    Object.entries(serviceTotals).forEach(([serviceName, total]) => {
+      initialQrQuantities[serviceName] = total.toString();
+      initialAdjustQuantities[serviceName] = total.toString();
     });
     
     setQrQuantities(initialQrQuantities);
     setAdjustQuantities(initialAdjustQuantities);
-  }, [orderItems]);
+  }, [serviceTotals]);
 
   const fetchOrderDetails = async () => {
     try {
@@ -166,6 +312,48 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
       console.log('Processing mode - scanning:', barcodeInput);
       console.log('Available garments:', garments.map(g => ({ id: g.id, qrCode: g.qrCode, status: g.status })));
       
+      // Check for any matching garment regardless of status
+      const anyMatchingGarment = garments.find(g => g.qrCode === barcodeInput.trim());
+      
+      if (!anyMatchingGarment) {
+        Alert.alert('Error', `No matching garment found with ID: ${barcodeInput.trim()}`);
+        setBarcodeInput('');
+        // Focus back on input field
+        barcodeInputRef.current?.focus();
+        return;
+      }
+      
+      // If the garment is already completed, toggle it back to IN_PROGRESS
+      if (anyMatchingGarment.status === 'COMPLETED') {
+        try {
+          const updateResult = await client.models.Garment.update({
+            id: anyMatchingGarment.id,
+            status: 'IN_PROGRESS',
+            lastScanned: new Date().toISOString()
+          });
+          
+          if (updateResult.data) {
+            // Remove from completed garments
+            setCompletedGarments(prev => prev.filter(id => id !== anyMatchingGarment.id));
+            
+            // Update local state
+            setGarments(prevGarments => 
+              prevGarments.map(g => g.id === anyMatchingGarment.id ? updateResult.data! : g)
+            );
+            
+            setBarcodeInput('');
+            // Focus back on input field
+            barcodeInputRef.current?.focus();
+          }
+          return;
+        } catch (err) {
+          console.error('Error updating garment status:', err);
+          Alert.alert('Error', 'Failed to update garment status');
+          return;
+        }
+      }
+      
+      // If we get here, we're dealing with an unprocessed garment
       const matchingGarment = garments.find(
         g => g.qrCode === barcodeInput.trim() && g.status !== 'COMPLETED'
       );
@@ -173,6 +361,8 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
       if (!matchingGarment) {
         Alert.alert('Error', `No matching unprocessed garment found with ID: ${barcodeInput.trim()}`);
         setBarcodeInput('');
+        // Focus back on input field
+        barcodeInputRef.current?.focus();
         return;
       }
       
@@ -193,6 +383,8 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
           );
           
           setBarcodeInput('');
+          // Focus back on input field
+          barcodeInputRef.current?.focus();
           
           // Check if all garments are now completed
           const updatedGarments = [...garments];
@@ -208,33 +400,21 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
             try {
               await client.models.Transaction.update({
                 id: order.id,
-                status: 'CLEANED'
+                status: 'CLEANED',
+                customerNotes: `${order.customerNotes || ''}\n[${new Date().toLocaleString()}] Status changed: PROCESSING → CLEANED`
               });
               
-              Alert.alert(
-                'Order Completed', 
-                'All garments have been processed. Order marked as CLEANED.',
-                [
-                  { 
-                    text: 'Assign to Rack', 
-                    onPress: () => navigation.navigate('RackAssignment', { 
-                      orderId: order.id,
-                      businessId: businessId 
-                    })
-                  },
-                  {
-                    text: 'Stay on Current Screen',
-                    style: 'cancel'
-                  }
-                ]
-              );
+              // Navigate directly to OrderManagement screen without showing notification
+              navigation.navigate('OrderManagement', { 
+                businessId: businessId 
+              });
             } catch (err) {
               console.error('Error updating order status:', err);
               Alert.alert('Error', 'Failed to update order status');
             }
           } else {
-            const remaining = garments.length - completedGarments.length - 1;
-            Alert.alert('Garment Processed', `Successfully processed garment. ${remaining} garment(s) remaining.`);
+            // Garment processed successfully, but not all garments are completed yet
+            // No notification shown as requested
           }
         }
       } catch (err) {
@@ -254,10 +434,14 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
         if (barcodeExists) {
           Alert.alert('Duplicate', `Item with barcode ${barcodeInput.trim()} has already been added`);
           setBarcodeInput('');
+          // Focus back on input field
+          barcodeInputRef.current?.focus();
+          // Focus back on input field
+          barcodeInputRef.current?.focus();
           return;
         }
         
-        // Check if barcode exists in ANY other order
+        // Check if barcode exists in ANY order (including this one)
         try {
           const existingGarmentsResult = await client.models.Garment.list({
             filter: { qrCode: { eq: barcodeInput.trim() } }
@@ -267,44 +451,91 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
             // Found the same barcode in the database
             const existingGarment = existingGarmentsResult.data[0];
             
-            // Get the order details to show which order it belongs to
+            // Check if this garment belongs to the current order
             const existingOrderResult = await client.models.TransactionItem.get({
               id: existingGarment.transactionItemID
             });
             
             if (existingOrderResult.data) {
-              const orderInfoResult = await client.models.Transaction.get({
-                id: existingOrderResult.data.transactionID
-              });
-              
-              let orderInfo = "";
-              if (orderInfoResult.data) {
-                const orderId = orderInfoResult.data.id.substring(0, 8);
-                const customerName = orderInfoResult.data.customerID || 'Unknown';
-                orderInfo = `Order #${orderId} (Customer: ${customerName})`;
-              }
-              
-              Alert.alert(
-                'Barcode Already Used',
-                `This barcode has already been scanned for ${orderInfo}. Do you still want to use it?`,
-                [
-                  {
-                    text: 'Cancel',
-                    style: 'cancel',
-                    onPress: () => setBarcodeInput('')
-                  },
-                  {
-                    text: 'Use Anyway',
-                    onPress: () => {
-                      // Show description modal for the scanned item
-                      setCurrentBarcode(barcodeInput);
-                      setShowDescriptionModal(true);
-                      setSelectedItem(orderItems[0]);
-                    }
+              // If the garment belongs to the current order, reuse it without showing the modal
+              if (existingOrderResult.data.transactionID === orderId) {
+                // This is a previously saved item for this order - reuse it without showing modal
+                // Create a new garment with the same description
+                const garmentResult = await client.models.Garment.create({
+                  transactionItemID: orderItems[0].id,
+                  qrCode: barcodeInput.trim(),
+                  description: existingGarment.description || 'No description',
+                  status: 'IN_PROGRESS',
+                  lastScanned: new Date().toISOString()
+                });
+
+                if (garmentResult.errors || !garmentResult.data) {
+                  throw new Error('Failed to create garment');
+                }
+
+                const newGarment = garmentResult.data;
+                setGarments(prevGarments => [...prevGarments, newGarment]);
+                
+                const newScannedCount = scannedCount + 1;
+                setScannedCount(newScannedCount);
+                
+                setBarcodeInput('');
+                // Focus back on input field
+                barcodeInputRef.current?.focus();
+                
+                // Check if all items are scanned - update order status and navigate
+                if (newScannedCount >= totalGarments && totalGarments > 0 && order) {
+                  try {
+                    // Update order status to PROCESSING and add note about status change
+                    await client.models.Transaction.update({
+                      id: order.id,
+                      status: 'PROCESSING',
+                      customerNotes: `${order.customerNotes || ''}\n[${new Date().toLocaleString()}] Status changed: PENDING → PROCESSING`
+                    });
+                    
+                    // Skip notification and navigate directly to OrderManagement
+                    navigation.navigate('OrderManagement', { businessId });
+                  } catch (err) {
+                    console.error('Error updating order status:', err);
+                    Alert.alert('Error', 'Failed to update order status to PROCESSING');
                   }
-                ]
-              );
-              return;
+                }
+                return;
+              } else {
+                // The garment belongs to a different order - show warning
+                const orderInfoResult = await client.models.Transaction.get({
+                  id: existingOrderResult.data.transactionID
+                });
+                
+                let orderInfo = "";
+                if (orderInfoResult.data) {
+                  const orderId = orderInfoResult.data.id.substring(0, 8);
+                  const customerName = orderInfoResult.data.customerID || 'Unknown';
+                  orderInfo = `Order #${orderId} (Customer: ${customerName})`;
+                }
+                
+                Alert.alert(
+                  'Barcode Already Used',
+                  `This barcode has already been scanned for ${orderInfo}. Do you still want to use it?`,
+                  [
+                    {
+                      text: 'Cancel',
+                      style: 'cancel',
+                      onPress: () => setBarcodeInput('')
+                    },
+                    {
+                      text: 'Use Anyway',
+                      onPress: () => {
+                        // Show description modal for the scanned item
+                        setCurrentBarcode(barcodeInput);
+                        setShowDescriptionModal(true);
+                        setSelectedItem(orderItems[0]);
+                      }
+                    }
+                  ]
+                );
+                return;
+              }
             }
           }
         } catch (error) {
@@ -350,36 +581,21 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
       setDescription('');
       setCurrentBarcode('');
       setBarcodeInput('');
+      // Focus back on input field
+      barcodeInputRef.current?.focus();
       
       // Check if all items are scanned - update order status and navigate
       if (newScannedCount >= totalGarments && totalGarments > 0 && order) {
         try {
-          // Update order status to PROCESSING
+          // Update order status to PROCESSING and add note about status change
           await client.models.Transaction.update({
             id: order.id,
-            status: 'PROCESSING'
+            status: 'PROCESSING',
+            customerNotes: `${order.customerNotes || ''}\n[${new Date().toLocaleString()}] Status changed: PENDING → PROCESSING`
           });
           
-          Alert.alert(
-            'All Items Scanned', 
-            'All items have been scanned. Order status changed to PROCESSING.',
-            [
-              { 
-                text: 'Start New Order', 
-                onPress: () => navigation.reset({
-                  index: 0,
-                  routes: [{ 
-                    name: 'CustomerSelection',
-                    params: { businessId } 
-                  }],
-                })
-              },
-              {
-                text: 'Stay on Current Screen',
-                style: 'cancel'
-              }
-            ]
-          );
+          // Skip notification and navigate directly to OrderManagement
+          navigation.navigate('OrderManagement', { businessId });
         } catch (err) {
           console.error('Error updating order status:', err);
           Alert.alert('Error', 'Failed to update order status to PROCESSING');
@@ -709,98 +925,116 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
     }
   };
 
-  const renderOrderItem = ({ item }: { item: Schema['TransactionItem']['type'] }) => {
-    // Count existing garments for this item
-    const existingGarments = garments.filter(g => g.transactionItemID === item.id).length;
+  const renderServiceItem = ({ item }: { item: [string, Schema['TransactionItem']['type'][]] }) => {
+    const [serviceName, serviceItems] = item;
+    
+    // Calculate the total quantity for this service
+    const totalQuantity = serviceItems.reduce((sum, item) => sum + Number(item.quantity), 0);
+    
+    // Count the number of unique products in this service
+    const productCount = serviceItems.length;
     
     return (
-      <View style={styles.itemCard}>
-        <View style={styles.itemHeader}>
-          <Text style={styles.itemName}>{item.name}</Text>
-          <Text style={styles.itemQuantity}>Quantity: {item.quantity}</Text>
+      <View style={styles.serviceCard}>
+        <View style={styles.serviceHeader}>
+          <Text style={styles.serviceName}>{serviceName}</Text>
+          <View style={styles.serviceQuantityContainer}>
+            <Text style={styles.serviceQuantity}>{totalQuantity}</Text>
+            <Text style={styles.productCount}>{productCount} {productCount === 1 ? 'product type' : 'product types'}</Text>
+          </View>
         </View>
         
-        <View style={styles.itemControls}>
-          <View style={styles.qrControls}>
-            <View style={styles.qrCounter}>
+        <View style={styles.serviceControls}>
+          <View style={styles.controlGroup}>
+            <Text style={styles.controlLabel}>Print:</Text>
+            <View style={styles.counterRow}>
               <TouchableOpacity 
                 style={styles.counterButton}
                 onPress={() => setQrQuantities(prev => ({
                   ...prev,
-                  [item.id]: Math.max(0, parseInt(prev[item.id] || '0') - 1).toString()
+                  [serviceName]: Math.max(0, parseInt(prev[serviceName] || '0') - 1).toString()
                 }))}
               >
                 <Text style={styles.counterButtonText}>-</Text>
               </TouchableOpacity>
-              <Text style={styles.counterValue}>{qrQuantities[item.id] || '0'}</Text>
+              <Text style={styles.counterValue}>{qrQuantities[serviceName] || '0'}</Text>
               <TouchableOpacity 
                 style={styles.counterButton}
                 onPress={() => setQrQuantities(prev => ({
                   ...prev,
-                  [item.id]: (parseInt(prev[item.id] || '0') + 1).toString()
+                  [serviceName]: (parseInt(prev[serviceName] || '0') + 1).toString()
                 }))}
               >
                 <Text style={styles.counterButtonText}>+</Text>
               </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.actionButton, !qrQuantities[serviceName] && styles.buttonDisabled]}
+                onPress={() => {
+                  // Use the first item in the service group as the selected item
+                  setSelectedItem(serviceItems[0]);
+                  handleGenerateQR();
+                }}
+                disabled={!qrQuantities[serviceName]}
+              >
+                <Text style={styles.actionButtonText}>Print</Text>
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity 
-              style={[styles.printButton, !qrQuantities[item.id] && styles.buttonDisabled]}
-              onPress={() => {
-                setSelectedItem(item);
-                handleGenerateQR();
-              }}
-              disabled={!qrQuantities[item.id]}
-            >
-              <Text style={styles.printButtonText}>Print</Text>
-            </TouchableOpacity>
           </View>
-          <Text style={styles.existingCount}>
-            Existing: {existingGarments}
-          </Text>
-          <View style={styles.adjustControls}>
-            <View style={styles.adjustCounter}>
+          
+          <View style={styles.controlGroup}>
+            <Text style={styles.controlLabel}>Adjust:</Text>
+            <View style={styles.counterRow}>
               <TouchableOpacity 
                 style={styles.counterButton}
                 onPress={() => {
-                  const currentQuantity = parseInt(adjustQuantities[item.id] || '0');
+                  const currentQuantity = parseInt(adjustQuantities[serviceName] || '0');
                   if (currentQuantity > 0) {
                     setAdjustQuantities(prev => ({
                       ...prev,
-                      [item.id]: (currentQuantity - 1).toString()
+                      [serviceName]: (currentQuantity - 1).toString()
                     }));
                   }
                 }}
               >
                 <Text style={styles.counterButtonText}>-</Text>
               </TouchableOpacity>
-              <Text style={styles.counterValue}>{adjustQuantities[item.id] || '0'}</Text>
+              <Text style={styles.counterValue}>{adjustQuantities[serviceName] || '0'}</Text>
               <TouchableOpacity 
                 style={styles.counterButton}
                 onPress={() => {
-                  const currentQuantity = parseInt(adjustQuantities[item.id] || '0');
+                  const currentQuantity = parseInt(adjustQuantities[serviceName] || '0');
                   setAdjustQuantities(prev => ({
                     ...prev,
-                    [item.id]: (currentQuantity + 1).toString()
+                    [serviceName]: (currentQuantity + 1).toString()
                   }));
                 }}
               >
                 <Text style={styles.counterButtonText}>+</Text>
               </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.actionButton, adjustQuantities[serviceName] === totalQuantity.toString() && styles.buttonDisabled]}
+                onPress={() => {
+                  // Apply the adjustment to all items in this service group
+                  const newTotalQuantity = parseInt(adjustQuantities[serviceName]);
+                  if (newTotalQuantity >= 0 && newTotalQuantity !== totalQuantity) {
+                    // Distribute the new quantity proportionally across all items in the service
+                    const ratio = newTotalQuantity / totalQuantity;
+                    serviceItems.forEach(item => {
+                      const newItemQuantity = Math.round(Number(item.quantity) * ratio);
+                      handleAdjustQuantity(item, newItemQuantity);
+                    });
+                  }
+                }}
+                disabled={adjustQuantities[serviceName] === totalQuantity.toString()}
+              >
+                <Text style={styles.actionButtonText}>Apply</Text>
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity 
-              style={[styles.adjustButton, adjustQuantities[item.id] === item.quantity.toString() && styles.buttonDisabled]}
-              onPress={() => {
-                setSelectedItem(item);
-                const newQuantity = parseInt(adjustQuantities[item.id]);
-                if (newQuantity >= 0 && newQuantity !== Number(item.quantity)) {
-                  handleAdjustQuantity(item, newQuantity);
-                }
-              }}
-              disabled={adjustQuantities[item.id] === item.quantity.toString()}
-            >
-              <Text style={styles.adjustButtonText}>Adjust</Text>
-            </TouchableOpacity>
           </View>
+          
+          <Text style={styles.existingCount}>Processed: {serviceItems.reduce((count, item) => {
+            return count + garments.filter(g => g.transactionItemID === item.id).length;
+          }, 0)}</Text>
         </View>
       </View>
     );
@@ -816,6 +1050,16 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
               Scanned: {new Date(item.lastScanned).toLocaleString()}
             </Text>
           )}
+          <TouchableOpacity 
+            style={styles.editDescriptionButton}
+            onPress={() => {
+              setEditingGarment(item);
+              setEditDescription(item.description || '');
+              setShowEditModal(true);
+            }}
+          >
+            <Text style={styles.editDescriptionButtonText}>Edit Description</Text>
+          </TouchableOpacity>
         </View>
         <View style={styles.imageActions}>
           {item.imageUrl ? (
@@ -890,6 +1134,7 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
           
           <View style={styles.barcodeContainer}>
             <TextInput
+              ref={barcodeInputRef}
               style={styles.input}
               value={barcodeInput}
               onChangeText={setBarcodeInput}
@@ -897,6 +1142,7 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
               keyboardType="default"
               autoCapitalize="none"
               onSubmitEditing={handleBarcodeSubmit}
+              autoFocus
             />
             <Button title="Process" onPress={handleBarcodeSubmit} />
           </View>
@@ -921,6 +1167,7 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
           {/* Barcode Input Section */}
           <View style={styles.barcodeSection}>
             <TextInput
+              ref={barcodeInputRef}
               style={styles.barcodeInput}
               placeholder="Scan or enter barcode"
               value={barcodeInput}
@@ -976,9 +1223,9 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
             <View style={styles.orderItemsSection}>
               <Text style={styles.sectionTitle}>Order Items</Text>
               <FlatList
-                data={orderItems}
-                renderItem={renderOrderItem}
-                keyExtractor={item => item.id}
+                data={Object.entries(serviceCategories)}
+                renderItem={renderServiceItem}
+                keyExtractor={([serviceName]) => serviceName}
                 style={styles.itemsList}
                 numColumns={2}
                 columnWrapperStyle={styles.columnWrapper}
@@ -1071,6 +1318,18 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f8f9fa',
+  },
+  editDescriptionButton: {
+    backgroundColor: '#4CAF50',
+    padding: 6,
+    borderRadius: 4,
+    marginTop: 8,
+    alignSelf: 'flex-start',
+  },
+  editDescriptionButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '500',
   },
   header: {
     flexDirection: 'row',
@@ -1382,6 +1641,78 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.5,
+  },
+  // New service-based layout styles
+  serviceCard: {
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    padding: 16,
+    marginBottom: 16,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    flex: 1,
+    margin: 8,
+  },
+  serviceHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+    paddingBottom: 8,
+  },
+  serviceName: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  serviceQuantity: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#2196F3',
+  },
+  serviceQuantityContainer: {
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+  },
+  productCount: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 2,
+    textAlign: 'right',
+  },
+  serviceControls: {
+    marginTop: 8,
+  },
+  controlGroup: {
+    marginBottom: 12,
+  },
+  controlLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#666',
+    marginBottom: 4,
+  },
+  counterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  actionButton: {
+    backgroundColor: '#2196F3',
+    padding: 8,
+    borderRadius: 4,
+    minWidth: 80,
+    marginLeft: 8,
+  },
+  actionButtonText: {
+    color: '#fff',
+    textAlign: 'center',
+    fontSize: 14,
+    fontWeight: '500',
   },
   adjustControls: {
     flexDirection: 'row',

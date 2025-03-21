@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import { saveBusinessData, getBusinessData, hasCreatedBusinessSync } from './utils/storage';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
 import { defaultServices, defaultProducts } from './data/defaultData';
@@ -13,36 +14,144 @@ const client = generateClient<Schema>();
 type DashboardScreenProps = NativeStackScreenProps<RootStackParamList, 'Dashboard'>;
 
 export default function Dashboard({ route }: DashboardScreenProps) {
-  const { businessId } = route.params || {};
-  const businessName = route.params?.businessName;
+  // Extract business data from route params
+  const { businessId, businessName } = route.params || {};
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [initializing, setInitializing] = useState(true);
   const [business, setBusiness] = useState<Schema['Business']['type'] | null>(null);
+  
+  // Log the business data from route params for debugging
+  // Dashboard initialized with business data from route params
 
   // Initialize services and products when Dashboard loads
   useEffect(() => {
-    if (!businessId) {
-      console.error('No businessId provided');
-      setInitializing(false);
-      return;
+    // First check if we have business data in AsyncStorage
+    const loadBusinessData = async (): Promise<boolean> => {
+      try {
+        const { businessId: storedBusinessId, businessName: storedBusinessName } = await getBusinessData();
+        
+        if (storedBusinessId && storedBusinessName) {
+          console.log('Using business data from storage:', {
+            businessId: storedBusinessId,
+            businessName: storedBusinessName
+          });
+          
+          // Set business with required fields
+          // TypeScript requires all fields, but we only need id and name for now
+          setBusiness({
+            id: storedBusinessId,
+            name: storedBusinessName
+          } as Schema['Business']['type']);
+          
+          setInitializing(false);
+          return true;
+        }
+        return false;
+      } catch (error) {
+        console.error('Error loading business data from storage:', error);
+        return false;
+      }
+    };
+    
+    // Use void to indicate we don't care about the return value in this chain
+    void loadBusinessData().then(foundInStorage => {
+      if (foundInStorage) return;
+      
+      // Continue with other initialization if not found in storage
+      void fetchFirstBusiness();
+    });
+    
+    // If no businessId is provided, fetch the first business
+    async function fetchFirstBusiness() {
+      try {
+        // If we already have a businessId from route params, use that instead of fetching
+        if (businessId) {
+          console.log('Using businessId from route params:', businessId);
+          
+          // IMPORTANT: Save business data to persistent storage
+          if (businessId && businessName) {
+            saveBusinessData(businessId, businessName).catch(error => {
+              console.error('Error saving business data:', error);
+            });
+          }
+          
+          // IMPORTANT: Notify App.tsx that we have business data
+          // This is a workaround to ensure App.tsx state is in sync with Dashboard
+          if (navigation && navigation.setParams) {
+            navigation.setParams({
+              _hasBusinessData: true,  // Special flag to indicate business data exists
+              businessId,
+              businessName
+            });
+          }
+          
+          return businessId;
+        }
+        
+        console.log('No businessId in route params, fetching first business...');
+        
+        const result = await client.models.Business.list({
+          limit: 1
+        });
+        
+        console.log('Business list result:', result);
+        
+        if (result.errors) {
+          console.error('Error fetching business:', result.errors);
+        } else if (result.data && result.data.length > 0) {
+          const fetchedBusiness = result.data[0];
+          console.log('Found business:', fetchedBusiness.name);
+          setBusiness(fetchedBusiness);
+          
+          // IMPORTANT: Notify App.tsx that we have business data
+          if (navigation && navigation.setParams) {
+            navigation.setParams({
+              _hasBusinessData: true,  // Special flag to indicate business data exists
+              businessId: fetchedBusiness.id,
+              businessName: fetchedBusiness.name
+            });
+          }
+          
+          return fetchedBusiness.id;
+        } else {
+          // No businesses found in database
+        }
+      } catch (error) {
+        // Error fetching first business
+      }
+      return null;
     }
     
-    async function initializeData() {
+    async function initializeData(activeBizId: string) {
       try {
-        // Fetch business details
+        // If we already have business data from route params, use it to initialize
+        if (businessId && businessName && !business) {
+          console.log('Using business data from route params to initialize');
+          setBusiness({
+            id: businessId,
+            name: businessName,
+            // Add other required fields with placeholder values
+            owner: '',
+            phoneNumber: '',
+            location: ''
+          } as Schema['Business']['type']);
+        }
+        
+        // Still fetch the full business details to ensure we have complete data
         const businessResult = await client.models.Business.get({
-          id: businessId
+          id: activeBizId
         });
         
         if (businessResult.errors) {
           console.error('Error fetching business:', businessResult.errors);
-        } else {
+        } else if (businessResult.data) {
+          console.log('Fetched complete business data:', businessResult.data.name);
           setBusiness(businessResult.data);
         }
 
         // Check if services already exist for this business
         const servicesResult = await client.models.Service.list({
-          filter: { businessID: { eq: businessId as string } }
+          filter: { businessID: { eq: activeBizId } }
         });
         
         if (servicesResult.errors) {
@@ -52,7 +161,7 @@ export default function Dashboard({ route }: DashboardScreenProps) {
           
           // Only create default services if none exist
           if (servicesData.length === 0) {
-            await createDefaultServices();
+            await createDefaultServices(activeBizId);
           }
         }
       } catch (error) {
@@ -62,17 +171,36 @@ export default function Dashboard({ route }: DashboardScreenProps) {
       }
     }
     
-    initializeData();
+    async function loadDashboard() {
+      let activeBizId = businessId;
+      
+      if (!activeBizId) {
+        // If no businessId is provided, try to fetch the first business
+        const fetchedId = await fetchFirstBusiness();
+        
+        if (!fetchedId) {
+          // No business found
+          setInitializing(false);
+          return;
+        }
+        
+        activeBizId = fetchedId;
+      }
+      
+      await initializeData(activeBizId);
+    }
+    
+    loadDashboard();
   }, [businessId]);
 
   // Function to create default services
-  const createDefaultServices = async () => {
+  const createDefaultServices = async (bizId: string) => {
     try {
       // Create default services
       for (const serviceData of defaultServices) {
         const result = await client.models.Service.create({
           ...serviceData,
-          businessID: businessId as string
+          businessID: bizId
         });
         
         if (result.errors) {
@@ -82,7 +210,7 @@ export default function Dashboard({ route }: DashboardScreenProps) {
         
         // Create default products for each service
         if (result.data?.id) {
-          await createDefaultProducts(result.data.id, serviceData.category);
+          await createDefaultProducts(result.data.id, serviceData.category, bizId);
         } else {
           console.error('Error: Service ID is undefined');
         }
@@ -95,7 +223,7 @@ export default function Dashboard({ route }: DashboardScreenProps) {
   };
   
   // Function to create default products for a service
-  const createDefaultProducts = async (serviceId: string, category: string) => {
+  const createDefaultProducts = async (serviceId: string, category: string, bizId: string) => {
     try {
       // Get products from the imported defaultProducts based on category
       const productsForCategory = defaultProducts[category as keyof typeof defaultProducts] || [];
@@ -104,7 +232,7 @@ export default function Dashboard({ route }: DashboardScreenProps) {
       for (const productData of productsForCategory) {
         await client.models.Product.create({
           serviceID: serviceId,
-          businessID: businessId as string,
+          businessID: bizId,
           name: productData.name,
           description: productData.description,
           price: productData.price,
@@ -131,13 +259,26 @@ export default function Dashboard({ route }: DashboardScreenProps) {
   ];
 
   const navigateToScreen = (screenName: string) => {
-    if (screenName === 'OrderManagement') {
-      navigation.navigate('OrderManagement', { businessId });
-    } else if (screenName === 'Dashboard') {
-      navigation.navigate('Dashboard', { businessId });
-    } else {
-      // Handle other screens
-      Alert.alert('Navigation', `Would navigate to ${screenName}`);
+    // Handle specific screens with their proper types
+    switch (screenName) {
+      case 'ServiceManagement':
+        navigation.navigate('ServiceManagement', { businessId });
+        break;
+      case 'ProductManagement':
+        navigation.navigate('ProductManagement', { businessId });
+        break;
+      case 'OrderManagement':
+        navigation.navigate('OrderManagement', { businessId });
+        break;
+      case 'DataExport':
+        navigation.navigate('DataExport', { businessId });
+        break;
+      case 'Dashboard':
+        navigation.navigate('Dashboard', { businessId });
+        break;
+      default:
+        // Fallback for screens not yet implemented
+        Alert.alert('Navigation', `Screen ${screenName} not implemented yet`);
     }
   };
 
@@ -148,6 +289,14 @@ export default function Dashboard({ route }: DashboardScreenProps) {
         <Text style={styles.loadingText}>Loading business data...</Text>
       </View>
     );
+  }
+  
+  // Instead of showing the No business found message,
+  // we'll show a loading indicator that will allow the App component
+  // to display the business creation modal
+  if (!business && !initializing) {
+    // Return to the parent component to handle showing the business creation modal
+    return null;
   }
   
   return (
@@ -214,6 +363,18 @@ const styles = StyleSheet.create({
     marginTop: 10,
     fontSize: 16,
     color: '#666',
+  },
+  errorText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#e53935',
+    marginBottom: 10,
+  },
+  messageText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    paddingHorizontal: 20,
   },
   header: {
     padding: 20,

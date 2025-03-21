@@ -96,7 +96,6 @@ export default function CheckoutScreen({ route, navigation }: CheckoutScreenProp
         throw new Error('Failed to create transaction: No data returned');
       }
       const transactionId = transactionResponse.data.id;
-      setTransactionId(transactionId);
       
       // Create transaction items
       for (const item of items) {
@@ -111,9 +110,7 @@ export default function CheckoutScreen({ route, navigation }: CheckoutScreenProp
         });
       }
       
-      setSuccess(true);
-      
-      // Handle receipt options
+      // Handle receipt options silently
       if (emailReceipt && customerEmail) {
         // In a real app, this would call a backend service to send an email
         console.log(`Email receipt sent to ${customerEmail}`);
@@ -123,6 +120,15 @@ export default function CheckoutScreen({ route, navigation }: CheckoutScreenProp
         // In a real app, this would trigger printing via a connected printer
         console.log('Printing receipt...');
       }
+      
+      // Navigate directly back to CustomerSelection without showing receipt page
+      navigation.reset({
+        index: 0,
+        routes: [{ 
+          name: 'CustomerSelection',
+          params: { businessId } 
+        }],
+      });
       
     } catch (error) {
       console.error('Error processing transaction:', error);

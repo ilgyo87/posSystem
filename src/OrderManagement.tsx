@@ -117,10 +117,26 @@ export default function OrderManagement({ route }: OrderManagementScreenProps) {
   };
 
   const handleViewOrderDetails = (order: Schema['Transaction']['type']) => {
-    navigation.navigate('OrderDetails' as any, { 
-      orderId: order.id, 
-      businessId 
-    });
+    // If order status is CLEANED, navigate to RackAssignment screen
+    if (order.status === 'CLEANED') {
+      navigation.navigate('RackAssignment', { 
+        orderId: order.id, 
+        businessId 
+      });
+    } 
+    // If order status is COMPLETED, navigate to CompletedOrderDetails screen
+    else if (order.status === 'COMPLETED') {
+      navigation.navigate('CompletedOrderDetails', { 
+        orderId: order.id, 
+        businessId 
+      });
+    } else {
+      // For all other statuses, navigate to OrderDetails as before
+      navigation.navigate('OrderDetails' as any, { 
+        orderId: order.id, 
+        businessId 
+      });
+    }
   };
 
   const handleScanBarcode = () => {
@@ -302,12 +318,6 @@ export default function OrderManagement({ route }: OrderManagementScreenProps) {
           <Text style={styles.orderTotal}>
             Total: ${Number(item.total || 0).toFixed(2)}
           </Text>
-          <TouchableOpacity 
-            style={styles.manageGarmentsButton}
-            onPress={() => handleViewGarments(item)}
-          >
-            <Text style={styles.manageGarmentsButtonText}>Manage Garments</Text>
-          </TouchableOpacity>
         </View>
       </TouchableOpacity>
     );
