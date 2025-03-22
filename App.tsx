@@ -67,15 +67,29 @@ const defaultConfig = {
   }
 }
 
+// Create console.log wrapper that includes timestamps
+const logger = {
+  log: (...args: any[]) => {
+    const timestamp = new Date().toISOString().substring(11, 23);
+    console.log(`[${timestamp}]`, ...args);
+  },
+  error: (...args: any[]) => {
+    const timestamp = new Date().toISOString().substring(11, 23);
+    console.error(`[${timestamp}]`, ...args);
+  }
+};
+
 // Use type assertion to avoid TypeScript errors
-Amplify.configure(defaultConfig as any)
+logger.log('Configuring Amplify with default config...');
+Amplify.configure(defaultConfig as any);
 
 // Try to load the outputs file if it exists (will be available at runtime)
 try {
-  const outputs = require("./amplify_outputs.json")
-  Amplify.configure(outputs)
+  const outputs = require("./amplify_outputs.json");
+  logger.log('Found amplify_outputs.json, configuring Amplify with file...');
+  Amplify.configure(outputs);
 } catch (e) {
-  console.log("amplify_outputs.json not found, using default config")
+  logger.log("amplify_outputs.json not found, using default config");
 }
 
 // Create the stack navigator with explicit type
@@ -179,343 +193,250 @@ const SignOutButton = () => {
 };
 
 function AppContent() {
-  const { user } = useAuthenticator()
-  const [initialRoute] = useState<keyof RootStackParamList>('Dashboard')
-  const [businessData, setBusinessData] = useState<{ id: string; name: string } | null>(null)
-  const [isLoading, setIsLoading] = useState(true) // Loading state while checking for business data
-  // Initialize showBusinessModal to false - we'll only set it to true if needed
-  const [showBusinessModal, setShowBusinessModal] = useState(false)
+  const { user, authStatus } = useAuthenticator();
+  const [initialRoute] = useState<keyof RootStackParamList>('Dashboard');
+  const [businessData, setBusinessData] = useState<{ id: string; name: string } | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [showBusinessModal, setShowBusinessModal] = useState(false);
+  const [authComplete, setAuthComplete] = useState(false);
   
+  // Effect to wait for authentication to complete before checking business
+  useEffect(() => {
+    logger.log('Auth status changed:', authStatus, user?.username);
+    
+    // Skip if not fully authenticated
+    if (authStatus !== 'authenticated' || !user) {
+      setIsLoading(false);
+      setAuthComplete(false);
+      return;
+    }
+    
+    // Mark authentication as complete
+    setAuthComplete(true);
+    
+    // Give auth time to fully propagate before checking business
+    const timer = setTimeout(() => {
+      checkForBusiness();
+    }, 500); // Short delay to ensure auth is ready
+    
+    return () => clearTimeout(timer);
+  }, [authStatus, user]);
+  
+  // Separate function to check for business
+  const checkForBusiness = async () => {
+    console.log('Checking for business data...');
+    setIsLoading(true);
+    
+    try {
+      // First try to get from storage
+      const storageData = await getBusinessData();
+      if (storageData.businessId && storageData.businessName) {
+        console.log('Found business in storage:', storageData.businessId);
+        
+        try {
+          const verifyResult = await client.models.Business.get({
+            id: storageData.businessId
+          });
+          
+          if (verifyResult.data) {
+            if (verifyResult.data.owner === user.username) {
+              console.log('Business verified, belongs to current user');
+              setBusinessData({
+                id: storageData.businessId,
+                name: storageData.businessName
+              });
+              
+              await checkAndInitializeServices(storageData.businessId);
+              setShowBusinessModal(false);
+              setIsLoading(false);
+              return;
+            } else {
+              console.log('Business found but belongs to different user');
+              await clearBusinessData();
+            }
+          } else {
+            console.log('Business not found in database');
+            await clearBusinessData();
+          }
+        } catch (error) {
+          console.error('Error verifying business:', error);
+          // Continue to check database directly
+        }
+      }
+      
+      // Then try to find user's businesses
+      try {
+        console.log('Checking for businesses owned by user:', user.username);
+        const result = await client.models.Business.list({
+          filter: {
+            owner: { eq: user.username }
+          }
+        });
+        
+        if (result.data && result.data.length > 0) {
+          const business = result.data[0];
+          console.log('Found business owned by user:', business.name);
+          
+          setBusinessData({
+            id: business.id,
+            name: business.name
+          });
+          
+          await saveBusinessData(business.id, business.name);
+          await checkAndInitializeServices(business.id);
+          setShowBusinessModal(false);
+        } else {
+          console.log('No businesses found for user, showing creation modal');
+          setShowBusinessModal(true);
+        }
+      } catch (error) {
+        console.error('Error checking for business:', error);
+        setShowBusinessModal(true);
+      }
+    } catch (error) {
+      console.error('Error in checkForBusiness:', error);
+      setShowBusinessModal(true);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-
+  // Function to check for existing services and initialize if needed
+  const checkAndInitializeServices = async (businessId: string) => {
+    try {
+      // Check if services already exist for this business
+      const servicesResult = await client.models.Service.list({
+        filter: { businessID: { eq: businessId } }
+      });
+      
+      if (servicesResult.errors) {
+        console.error('Error checking services:', servicesResult.errors);
+        return;
+      }
+      
+      // If no services exist, create the default ones
+      if (!servicesResult.data || servicesResult.data.length === 0) {
+        await createDefaultServices(businessId);
+      }
+    } catch (error: any) {
+      console.error('Error checking for services:', error);
+    }
+  };
+  
   // Function to create default services
   const createDefaultServices = async (businessId: string) => {
     try {
-      setIsLoading(true)
+      setIsLoading(true);
       // Create default services
       for (const serviceData of defaultServices) {
+        // Create a new object without the category field
+        const { category, ...serviceDataWithoutCategory } = serviceData;
+        
         const result = await client.models.Service.create({
-          ...serviceData,
+          ...serviceDataWithoutCategory,
           businessID: businessId
-        })
+        });
         
         if (result.errors) {
-          console.error('Error creating default service:', result.errors)
-          continue
+          console.error('Error creating default service:', result.errors);
+          continue;
         }
         
         // Create default products for each service
         if (result.data?.id) {
-          await createDefaultProducts(result.data.id, serviceData.category, businessId)
+          await createDefaultProducts(result.data.id, category, businessId);
         } else {
-          console.error('Error: Service ID is undefined')
+          console.error('Error: Service ID is undefined');
         }
       }
       
-      console.log('Default services and products created successfully')
-    } catch (error) {
-      console.error('Error creating default services:', error)
+      console.log('Default services and products created successfully');
+    } catch (error: any) {
+      console.error('Error creating default services:', error);
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
   
   // Function to create default products for a service
   const createDefaultProducts = async (serviceId: string, category: string, businessId: string) => {
     try {
       // Get products from the imported defaultProducts based on category
-      const productsForCategory = defaultProducts[category as keyof typeof defaultProducts] || []
+      const productsForCategory = defaultProducts[category as keyof typeof defaultProducts] || [];
       
       // Create each product
       for (const productData of productsForCategory) {
         const result = await client.models.Product.create({
           ...productData,
           serviceID: serviceId,
-          businessID: businessId,
-          isActive: true // Add required field
-        })
+          businessID: businessId
+        });
         
         if (result.errors) {
-          console.error('Error creating default product:', result.errors)
+          console.error('Error creating default product:', result.errors);
         }
       }
-    } catch (error) {
-      console.error('Error creating default products:', error)
-    }
-  }
-
-  // Function to create a new business from user attributes
-  const createBusinessFromUserAttributes = async () => {
-    if (!user) return;
-    
-    try {
-      // Get business name and phone number from user attributes
-      const userAttributes = (user as any).attributes || {};
-      console.log('User attributes:', userAttributes);
-      
-      const businessName = userAttributes['custom:business_name'];
-      const phoneNumber = userAttributes['phone_number'];
-      
-      if (!businessName) {
-        console.error('No business name found in user attributes');
-        return;
-      }
-      
-      console.log('Creating business with name:', businessName, 'and phone:', phoneNumber);
-      
-      // Generate a unique ID for the business
-      const businessId = uuidv4();
-      
-      // Create business object with owner field
-      const newBusiness = {
-        id: businessId,
-        name: businessName,
-        phoneNumber: phoneNumber || '',
-        location: '',
-        owner: user.userId,
-        isActive: true
-      };
-      
-      // Save to Amplify Data API
-      const result = await client.models.Business.create(newBusiness);
-      
-      if (result.errors) {
-        console.error('Error creating business:', result.errors);
-        return;
-      }
-      
-      console.log('Business created successfully:', result.data);
-      
-      // Set business data for the app
-      setBusinessData({
-        id: businessId,
-        name: businessName
-      });
-      
-      // Create default services for the new business
-      await createDefaultServices(businessId);
-      
-      console.log('Business created successfully from user attributes');
-    } catch (error) {
-      console.error('Error creating business from user attributes:', error);
+    } catch (error: any) {
+      console.error('Error creating default products:', error);
     }
   };
 
-  useEffect(() => {
-    async function checkBusiness() {
-      if (!user) {
-        setIsLoading(false);
-        return;
-      }
-      
-      try {
-        setIsLoading(true);
-        // Check for existing business
-        
-        // First check AsyncStorage (fast)
-        const hasBusinessInStorage = await checkBusinessExistsInStorage();
-        
-        if (hasBusinessInStorage) {
-          // Get the business data from storage
-          const storedData = await getBusinessData();
-          
-          if (storedData.businessId && storedData.businessName) {
-            // Verify business data from storage with database
-            
-            // Verify the business exists in the database
-            try {
-              const verifyResult = await client.models.Business.get({
-                id: storedData.businessId
-              });
-              
-              if (verifyResult.data) {
-                // Update state with verified business data
-                setBusinessData({
-                  id: verifyResult.data.id,
-                  name: verifyResult.data.name
-                });
-                
-                // Ensure modal is hidden
-                setShowBusinessModal(false);
-                setIsLoading(false);
-                return;
-              } else {
-                // Business doesn't exist in database, clear storage
-                // Business doesn't exist in database, clear storage
-                await clearBusinessData();
-              }
-            } catch (error) {
-              console.error('Error verifying business:', error);
-              // On error, continue to database check
-            }
-          }
-        }
-        
-        // If not in storage or incomplete data, query the database (authoritative)
-        // Check database for business data
-        const result = await client.models.Business.list({
-          filter: { owner: { eq: user.userId } }
-        });
-
-        if (result.data && result.data.length > 0) {
-          // Business exists in database
-          const business = result.data[0];
-          // Business exists in database
-          
-          // First hide the modal to prevent any flashing
-          setShowBusinessModal(false);
-          
-          // Then update local state with business data
-          setBusinessData({
-            id: business.id,
-            name: business.name
-          });
-          
-          // Save to AsyncStorage for faster future checks
-          await saveBusinessData(business.id, business.name);
-          await markBusinessAsCreated();
-          
-          // Business data saved to storage and state updated
-        } else {
-          // Clear any existing business data to be safe
-          setBusinessData(null);
-          
-          // Only show modal after confirming no business exists
-          setShowBusinessModal(true);
-        }
-      } catch (error) {
-        console.error('Error checking business:', error);
-        // On error, don't show the modal to be safe
-        setShowBusinessModal(false);
-      } finally {
-        setIsLoading(false);
-      }
-    }
-
-    checkBusiness();
-  }, [user])
-
-
-
-  // Handle business creation from the modal
+  // Function to create a business from the modal
   const handleBusinessCreated = (business: Schema['Business']['type']) => {
-    // Business created successfully
+    console.log('Business created:', business.id, business.name);
     
-    // IMPORTANT: Save business data to persistent storage
-    // This ensures data persists between app sessions
-    saveBusinessData(business.id, business.name);
-    
-    // Hide the modal immediately
-    setShowBusinessModal(false);
-    
-    // Update business data in state
+    // Set business data for the app
     setBusinessData({
       id: business.id,
       name: business.name
     });
     
-    // Complete initialization
-    setIsLoading(false);
+    // Save business to storage
+    saveBusinessData(business.id, business.name).then(() => {
+      console.log('Business data saved to storage');
+    }).catch(error => {
+      console.error('Error saving business data:', error);
+    });
     
-    // Business data saved and modal hidden
+    // Mark as created
+    markBusinessAsCreated().then(() => {
+      console.log('Business marked as created');
+    }).catch(error => {
+      console.error('Error marking business as created:', error);
+    });
+    
+    // Check and initialize default services
+    checkAndInitializeServices(business.id).then(() => {
+      console.log('Services checked/initialized');
+    }).catch(error => {
+      console.error('Error checking/initializing services:', error);
+    });
+    
+    // Hide the modal
+    setShowBusinessModal(false);
   };
-
-  // State management is handled by the above code
   
-  // DIRECT DATABASE CHECK: Query for business data when user authenticates
-  useEffect(() => {
-    // Only run this effect when we have a user
-    if (!user) {
-      console.log('🔍 No user authenticated yet, waiting...');
-      return;
-    }
-
-    console.log('🔍 User authenticated, checking for business data:', user.userId);
-    setIsLoading(true); // Start loading state
-    
-    const checkBusinessData = async () => {
-      try {
-        // DIRECT DATABASE QUERY - most reliable source of truth
-        console.log('🔍 Querying database for businesses...');
-        const result = await client.models.Business.list();
-        
-        if (result.errors) {
-          throw new Error(`Database query error: ${result.errors[0].message}`);
-        }
-        
-        // Log the raw result for debugging
-        console.log('🔍 Database query result:', 
-          result.data ? `Found ${result.data.length} businesses` : 'No data returned');
-        
-        if (result.data && result.data.length > 0) {
-          // Business exists in database - use the first one
-          const business = result.data[0];
-          console.log('✅ Found business in database:', business.id, business.name);
-          
-          // Update app state
-          setBusinessData({
-            id: business.id,
-            name: business.name
-          });
-          
-          // Save to local storage for faster access next time
-          await saveBusinessData(business.id, business.name);
-          console.log('💾 Saved business data to local storage');
-          
-          // Ensure modal stays hidden
-          setShowBusinessModal(false);
-        } else {
-          // FALLBACK: Check local storage in case database is empty but we have cached data
-          // No businesses in database, checking local storage
-          const { businessId, businessName } = await getBusinessData();
-          
-          if (businessId && businessName) {
-            console.log('✅ Found business in local storage:', businessId, businessName);
-            setBusinessData({
-              id: businessId,
-              name: businessName
-            });
-            setShowBusinessModal(false);
-          } else {
-            // No business found anywhere - show the modal
-            setShowBusinessModal(true);
-          }
-        }
-      } catch (error) {
-        // Error checking for business data
-        
-        // FALLBACK: On error, check local storage
-        try {
-          const { businessId, businessName } = await getBusinessData();
-          
-          if (businessId && businessName) {
-            // Found business in local storage fallback
-            setBusinessData({
-              id: businessId,
-              name: businessName
-            });
-            setShowBusinessModal(false);
-          } else {
-            // Last resort - show modal if we can't find anything
-            // No business found in fallback, showing modal
-            setShowBusinessModal(true);
-          }
-        } catch (storageError) {
-          // Local storage fallback failed
-          setShowBusinessModal(true);
-        }
-      } finally {
-        // Always finish loading state
-        setIsLoading(false);
-      }
-    };
-    
-    // Execute the check
-    checkBusinessData();
-  }, [user]); // Only depends on user authentication
+  // SIMPLIFIED MODAL VISIBILITY: Only show modal when loading is complete, user is authenticated, and showBusinessModal is true
+  // Also ensure that authentication is fully complete before showing modal
+  const shouldShowModal = showBusinessModal && !isLoading && authStatus === 'authenticated' && !!user && authComplete;
   
-  // SIMPLIFIED MODAL VISIBILITY: Only show modal when loading is complete and showBusinessModal is true
-  const shouldShowModal = showBusinessModal && !isLoading;
+  // Show loading state or no access message while not authenticated
+  if (authStatus !== 'authenticated' && !isLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <Text>Please sign in to access the app</Text>
+      </View>
+    );
+  }
+  
+  // Show loading indicator while authentication is being processed
+  if (isLoading || !authComplete) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <Text>Loading...</Text>
+      </View>
+    );
+  }
   
   return (
     <NavigationContainer>
@@ -525,14 +446,10 @@ function AppContent() {
           <View style={modalStyles.modalContent}>
             <View style={modalStyles.modalHeader}>
               <Text style={modalStyles.modalTitle}>Create Your Business</Text>
-              <TouchableOpacity 
-                style={modalStyles.closeButton}
-                onPress={() => setShowBusinessModal(false)}
-                accessibilityLabel="Close modal"
-              >
-                <Text style={modalStyles.closeButtonText}>✕</Text>
-              </TouchableOpacity>
             </View>
+            <Text style={modalStyles.modalText}>
+              Please create a business to continue using the app
+            </Text>
             <View style={modalStyles.businessCreateContainer}>
               <BusinessCreate 
                 onBusinessCreated={handleBusinessCreated} 
@@ -650,17 +567,19 @@ function AppContent() {
   )
 }
 
-
-
-
 export default function App() {
   return (
     <SafeAreaProvider>
       <Authenticator.Provider>
-        <Authenticator>
+        <Authenticator
+          // Ensure the Authenticator is shown first before any app content
+          // This fixes the issue of going straight to business creation
+          signUpAttributes={['email']}
+        >
           <AppContent />
         </Authenticator>
       </Authenticator.Provider>
     </SafeAreaProvider>
   )
 }
+

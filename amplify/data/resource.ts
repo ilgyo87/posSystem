@@ -2,33 +2,53 @@ import { a, defineData, type ClientSchema } from "@aws-amplify/backend";
 
 const schema = a.schema({
   Business: a
-    .model({
-      id: a.id().required(),
-      name: a.string().required(),
-      phoneNumber: a.phone().required(),
-      location: a.string(),
-      employees: a.hasMany("Employee", "businessID"),
-      services: a.hasMany("Service", "businessID"),
-      orders: a.hasMany("Order", "businessID"),
-      appointments: a.hasMany("Appointment", "businessID"),
-      customers: a.hasMany("Customer", "businessID"),
-      products: a.hasMany("Product", "businessID"),
-      transactions: a.hasMany("Transaction", "businessID")
-    })
-    .authorization((allow) => allow.owner()),
+  .model({
+    id: a.id().required(),
+    name: a.string().required(),
+    phoneNumber: a.string().required(),
+    location: a.string(),
+    owner: a.string().required(),
+    employees: a.hasMany("Employee", "businessID"),
+    services: a.hasMany("Service", "businessID"),
+    orders: a.hasMany("Order", "businessID"),
+    appointments: a.hasMany("Appointment", "businessID"),
+    customers: a.hasMany("Customer", "businessID"),
+    products: a.hasMany("Product", "businessID"),
+    transactions: a.hasMany("Transaction", "businessID"),
+    employeeBusinessLinks: a.hasMany("EmployeeBusinessLink", "businessID"),
+    garmentBusinessLinks: a.hasMany("GarmentBusinessLink", "businessID")
+  })
+  .authorization((allow) => [
+    allow.owner(),
+    allow.authenticated().to(['get', 'list'])
+  ])
+  .secondaryIndexes((index) => [
+    index("name").sortKeys(["phoneNumber"])
+  ]),
 
   Employee: a
-    .model({
-      id: a.id().required(),
-      businessID: a.id().required(),
-      email: a.string().required(),
-      name: a.string().required(),
-      role: a.string().required(), // OWNER, MANAGER, STAFF
-      business: a.belongsTo("Business", "businessID"),
-      orders: a.hasMany("Order", "employeeID"),
-      appointments: a.hasMany("Appointment", "employeeID")
-    })
-    .authorization((allow) => allow.owner()),
+  .model({
+    id: a.id().required(),
+    email: a.string().required(),
+    firstName: a.string().required(),
+    lastName: a.string().required(),
+    role: a.string().required(), // OWNER, MANAGER, STAFF
+    phoneNumber: a.phone().required(),
+    city: a.string(),
+    zipCode: a.string(),
+    state: a.string(),
+    country: a.string(),
+    address: a.string(),
+    businessID: a.id().required(),
+    business: a.belongsTo("Business", "businessID"),
+    orders: a.hasMany("Order", "employeeID"),
+    appointments: a.hasMany("Appointment", "employeeID"),
+    employeeBusinessLinks: a.hasMany("EmployeeBusinessLink", "employeeID")
+  })
+  .secondaryIndexes((index) => [
+    index("phoneNumber").sortKeys(["lastName"])
+  ])
+  .authorization((allow) => allow.owner()),
 
   Service: a
     .model({
@@ -38,7 +58,6 @@ const schema = a.schema({
       description: a.string(),
       basePrice: a.float().required(),
       estimatedDuration: a.integer().required(), // in minutes
-      category: a.string().required(), // e.g., "DRY_CLEANING", "LAUNDRY", "ALTERATIONS"
       business: a.belongsTo("Business", "businessID"),
       orderItems: a.hasMany("OrderItem", "serviceID"),
       products: a.hasMany("Product", "serviceID")
@@ -83,6 +102,32 @@ const schema = a.schema({
     })
     .authorization((allow) => allow.owner()),
 
+  Garment: a
+    .model({
+      id: a.id().required(),
+      qrCode: a.string().required(),
+      description: a.string().required(),
+      status: a.string().required(), // PENDING, IN_PROGRESS, COMPLETED, CANCELLED
+      notes: a.string(),
+      type: a.string().required(), // CLOTHING, ACCESSORY, SHOE, OTHER
+      brand: a.string(),
+      size: a.string(),
+      color: a.string(),
+      material: a.string(),
+      lastScanned: a.datetime(),
+      imageUrl: a.string(),
+      transactionItemID: a.id().required(),
+      transactionItem: a.belongsTo("TransactionItem", "transactionItemID"),
+      garmentBusinessLinks: a.hasMany("GarmentBusinessLink", "garmentID")
+    })
+    .secondaryIndexes((index) => [
+      index("qrCode")
+    ])
+    .authorization((allow) => [
+      allow.owner(),
+      allow.authenticated().to(['list', 'get'])
+    ]),
+
   Appointment: a
     .model({
       id: a.id().required(),
@@ -99,7 +144,7 @@ const schema = a.schema({
       order: a.hasOne("Order", "appointmentID")
     })
     .authorization((allow) => allow.owner()),
-
+    
   Customer: a
     .model({
       id: a.id().required(),
@@ -109,14 +154,31 @@ const schema = a.schema({
       phoneNumber: a.phone().required(),
       email: a.email(),
       address: a.string(),
-      preferredContactMethod: a.string().required(), // EMAIL, SMS, BOTH
-      notificationPreferences: a.boolean().required(), // true if they want notifications
+      profileImageUrl: a.string(),
+      qrCode: a.string().required(), // Unique QR code for customer identification
+      preferredContactMethod: a.string(),
+      notificationPreferences: a.boolean(),
+      customerNotes: a.string(),
+      customerType: a.string(),
       business: a.belongsTo("Business", "businessID"),
       orders: a.hasMany("Order", "customerID"),
       appointments: a.hasMany("Appointment", "customerID"),
-      transactions: a.hasMany("Transaction", "customerID")
+      transactions: a.hasMany("Transaction", "customerID"),
+      globalId: a.string(), // Used to link the same customer across different businesses
+      accountVerified: a.boolean(),
+      lastLogin: a.datetime(),
     })
-    .authorization((allow) => allow.owner()),
+    .secondaryIndexes((index) => [
+      index("businessID").sortKeys(["lastName"]),
+      index("phoneNumber"),
+      index("email"),
+      index("qrCode"),
+      index("globalId")
+    ])
+    .authorization((allow) => [
+      allow.owner(),
+      allow.authenticated().to(['list', 'get'])
+    ]),
     
   Product: a
     .model({
@@ -139,9 +201,9 @@ const schema = a.schema({
       id: a.id().required(),
       businessID: a.id().required(),
       customerID: a.id().required(),
-      status: a.string().required(), // PENDING, COMPLETED, CANCELLED
+      status: a.string().required(),
       total: a.float().required(),
-      paymentMethod: a.string().required(), // CASH, CARD, OTHER
+      paymentMethod: a.string().required(),
       pickupDate: a.string().required(),
       customerNotes: a.string(),
       receiptSent: a.boolean(),
@@ -157,7 +219,7 @@ const schema = a.schema({
     .model({
       id: a.id().required(),
       transactionID: a.id().required(),
-      itemType: a.string().required(), // SERVICE, PRODUCT
+      itemType: a.string().required(),
       name: a.string().required(),
       quantity: a.integer().required(),
       price: a.float().required(),
@@ -168,19 +230,26 @@ const schema = a.schema({
     })
     .authorization((allow) => allow.owner()),
 
-  Garment: a
+  EmployeeBusinessLink: a
     .model({
       id: a.id().required(),
-      transactionItemID: a.id().required(),
-      qrCode: a.string().required(),
-      description: a.string().required(),
-      status: a.string().required(), // PENDING, IN_PROGRESS, COMPLETED, CANCELLED
-      notes: a.string(),
-      lastScanned: a.datetime(),
-      imageUrl: a.string(),
-      transactionItem: a.belongsTo("TransactionItem", "transactionItemID")
+      employeeID: a.id().required(),
+      businessID: a.id().required(),
+      employee: a.belongsTo("Employee", "employeeID"),
+      business: a.belongsTo("Business", "businessID")
     })
-    .authorization((allow) => allow.owner())
+    .authorization((allow) => allow.owner()),
+
+  GarmentBusinessLink: a
+    .model({
+      id: a.id().required(),
+      garmentID: a.id().required(),
+      businessID: a.id().required(),
+      garment: a.belongsTo("Garment", "garmentID"),
+      business: a.belongsTo("Business", "businessID")
+    })
+    .authorization((allow) => allow.owner()),
+
 });
 
 export type Schema = ClientSchema<typeof schema>;
@@ -190,4 +259,4 @@ export const data = defineData({
   authorizationModes: {
     defaultAuthorizationMode: "userPool"
   }
-});
+}); 

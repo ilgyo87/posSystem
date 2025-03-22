@@ -1,6 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIndicator } from 'react-native';
-import { saveBusinessData, getBusinessData, hasCreatedBusinessSync } from './utils/storage';
+import React, { useEffect, useState, useRef } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIndicator, Modal, FlatList } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
 import { defaultServices, defaultProducts } from './data/defaultData';
@@ -13,236 +12,238 @@ const client = generateClient<Schema>();
 
 type DashboardScreenProps = NativeStackScreenProps<RootStackParamList, 'Dashboard'>;
 
-export default function Dashboard({ route }: DashboardScreenProps) {
+export default function Dashboard({ route, navigation }: DashboardScreenProps) {
   // Extract business data from route params
   const { businessId, businessName } = route.params || {};
-  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  // Keep the useNavigation hook as a fallback, but prefer the navigation prop from props
+  const navigationFallback = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  // Use the navigation prop if available, otherwise use the hook result
+  const nav = navigation || navigationFallback;
+  
   const [initializing, setInitializing] = useState(true);
   const [business, setBusiness] = useState<Schema['Business']['type'] | null>(null);
   
-  // Log the business data from route params for debugging
-  // Dashboard initialized with business data from route params
+  // State for business selection modal
+  const [businessSelectionModalVisible, setBusinessSelectionModalVisible] = useState(false);
+  const [allBusinesses, setAllBusinesses] = useState<Schema['Business']['type'][]>([]);
+  const [loadingBusinesses, setLoadingBusinesses] = useState(false);
+  
+  // State to track if navigation is ready
+  const [isNavigationReady, setIsNavigationReady] = useState(false);
+
+  // Track if component is mounted to avoid state updates after unmount
+  const isMounted = useRef(true);
+  
+  useEffect(() => {
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
+  
+  // Check if navigation is ready
+  useEffect(() => {
+    if (nav) {
+      setIsNavigationReady(true);
+    }
+  }, [nav]);
 
   // Initialize services and products when Dashboard loads
   useEffect(() => {
-    // First check if we have business data in AsyncStorage
-    const loadBusinessData = async (): Promise<boolean> => {
-      try {
-        const { businessId: storedBusinessId, businessName: storedBusinessName } = await getBusinessData();
-        
-        if (storedBusinessId && storedBusinessName) {
-          console.log('Using business data from storage:', {
-            businessId: storedBusinessId,
-            businessName: storedBusinessName
-          });
-          
-          // Set business with required fields
-          // TypeScript requires all fields, but we only need id and name for now
-          setBusiness({
-            id: storedBusinessId,
-            name: storedBusinessName
-          } as Schema['Business']['type']);
-          
-          setInitializing(false);
-          return true;
-        }
-        return false;
-      } catch (error) {
-        console.error('Error loading business data from storage:', error);
-        return false;
-      }
-    };
-    
-    // Use void to indicate we don't care about the return value in this chain
-    void loadBusinessData().then(foundInStorage => {
-      if (foundInStorage) return;
-      
-      // Continue with other initialization if not found in storage
-      void fetchFirstBusiness();
-    });
-    
-    // If no businessId is provided, fetch the first business
-    async function fetchFirstBusiness() {
-      try {
-        // If we already have a businessId from route params, use that instead of fetching
-        if (businessId) {
-          console.log('Using businessId from route params:', businessId);
-          
-          // IMPORTANT: Save business data to persistent storage
-          if (businessId && businessName) {
-            saveBusinessData(businessId, businessName).catch(error => {
-              console.error('Error saving business data:', error);
-            });
-          }
-          
-          // IMPORTANT: Notify App.tsx that we have business data
-          // This is a workaround to ensure App.tsx state is in sync with Dashboard
-          if (navigation && navigation.setParams) {
-            navigation.setParams({
-              _hasBusinessData: true,  // Special flag to indicate business data exists
-              businessId,
-              businessName
-            });
-          }
-          
-          return businessId;
-        }
-        
-        console.log('No businessId in route params, fetching first business...');
-        
-        const result = await client.models.Business.list({
-          limit: 1
-        });
-        
-        console.log('Business list result:', result);
-        
-        if (result.errors) {
-          console.error('Error fetching business:', result.errors);
-        } else if (result.data && result.data.length > 0) {
-          const fetchedBusiness = result.data[0];
-          console.log('Found business:', fetchedBusiness.name);
-          setBusiness(fetchedBusiness);
-          
-          // IMPORTANT: Notify App.tsx that we have business data
-          if (navigation && navigation.setParams) {
-            navigation.setParams({
-              _hasBusinessData: true,  // Special flag to indicate business data exists
-              businessId: fetchedBusiness.id,
-              businessName: fetchedBusiness.name
-            });
-          }
-          
-          return fetchedBusiness.id;
-        } else {
-          // No businesses found in database
-        }
-      } catch (error) {
-        // Error fetching first business
-      }
-      return null;
-    }
-    
-    async function initializeData(activeBizId: string) {
-      try {
-        // If we already have business data from route params, use it to initialize
-        if (businessId && businessName && !business) {
-          console.log('Using business data from route params to initialize');
-          setBusiness({
-            id: businessId,
-            name: businessName,
-            // Add other required fields with placeholder values
-            owner: '',
-            phoneNumber: '',
-            location: ''
-          } as Schema['Business']['type']);
-        }
-        
-        // Still fetch the full business details to ensure we have complete data
-        const businessResult = await client.models.Business.get({
-          id: activeBizId
-        });
-        
-        if (businessResult.errors) {
-          console.error('Error fetching business:', businessResult.errors);
-        } else if (businessResult.data) {
-          console.log('Fetched complete business data:', businessResult.data.name);
-          setBusiness(businessResult.data);
-        }
-
-        // Check if services already exist for this business
-        const servicesResult = await client.models.Service.list({
-          filter: { businessID: { eq: activeBizId } }
-        });
-        
-        if (servicesResult.errors) {
-          console.error('Error checking services:', servicesResult.errors);
-        } else {
-          const servicesData = servicesResult.data ?? [];
-          
-          // Only create default services if none exist
-          if (servicesData.length === 0) {
-            await createDefaultServices(activeBizId);
-          }
-        }
-      } catch (error) {
-        console.error('Error initializing data:', error);
-      } finally {
-        setInitializing(false);
-      }
-    }
-    
+    // Load business data and initialize services
     async function loadDashboard() {
+      if (!isMounted.current) return;
+      
       let activeBizId = businessId;
       
       if (!activeBizId) {
         // If no businessId is provided, try to fetch the first business
         const fetchedId = await fetchFirstBusiness();
         
-        if (!fetchedId) {
-          // No business found
-          setInitializing(false);
+        if (!fetchedId || !isMounted.current) {
+          // No business found or component unmounted
+          if (isMounted.current) setInitializing(false);
           return;
         }
         
         activeBizId = fetchedId;
       }
       
-      await initializeData(activeBizId);
+      if (isMounted.current) {
+        await initializeData(activeBizId);
+      }
     }
     
+    // Execute immediately - the navigation container is already initialized in App.tsx
     loadDashboard();
   }, [businessId]);
 
-  // Function to create default services
-  const createDefaultServices = async (bizId: string) => {
+  // If no businessId is provided, fetch the first business
+  async function fetchFirstBusiness() {
     try {
-      // Create default services
-      for (const serviceData of defaultServices) {
-        const result = await client.models.Service.create({
-          ...serviceData,
-          businessID: bizId
-        });
+      // If we already have a businessId from route params, use that instead of fetching
+      if (businessId) {
+        console.log('Using businessId from route params:', businessId);
         
-        if (result.errors) {
-          console.error('Error creating default service:', result.errors);
-          continue;
+        // IMPORTANT: Notify App.tsx that we have business data
+        // This is a workaround to ensure App.tsx state is in sync with Dashboard
+        if (isMounted.current && isNavigationReady && nav) {
+          // Use a safer approach to update params
+          const updateParams = () => {
+            try {
+              // Cast to any to avoid TypeScript errors with _hasBusinessData
+              nav.setParams({
+                _hasBusinessData: true,  // Special flag to indicate business data exists
+                businessId,
+                businessName
+              } as any);
+            } catch (error) {
+              console.log('Could not update navigation params:', error);
+            }
+          };
+          
+          // Try to update params
+          updateParams();
         }
         
-        // Create default products for each service
-        if (result.data?.id) {
-          await createDefaultProducts(result.data.id, serviceData.category, bizId);
-        } else {
-          console.error('Error: Service ID is undefined');
-        }
+        return businessId;
       }
       
-      console.log('Default services and products created successfully');
+      console.log('No businessId in route params, fetching first business...');
+      
+      const result = await client.models.Business.list({
+        limit: 1
+      });
+      
+      console.log('Business list result:', result);
+      
+      if (result.errors) {
+        console.error('Error fetching business:', result.errors);
+      } else if (result.data && result.data.length > 0) {
+        const fetchedBusiness = result.data[0];
+        console.log('Found business:', fetchedBusiness.name);
+        setBusiness(fetchedBusiness);
+        
+        // IMPORTANT: Notify App.tsx that we have business data
+        if (isMounted.current && isNavigationReady && nav) {
+          // Use a safer approach to update params
+          const updateParams = () => {
+            try {
+              // Cast to any to avoid TypeScript errors with _hasBusinessData
+              nav.setParams({
+                _hasBusinessData: true,  // Special flag to indicate business data exists
+                businessId: fetchedBusiness.id,
+                businessName: fetchedBusiness.name
+              } as any);
+            } catch (error) {
+              console.log('Could not update navigation params:', error);
+            }
+          };
+          
+          // Try to update params
+          updateParams();
+        }
+        
+        return fetchedBusiness.id;
+      } else {
+        // No businesses found in database
+      }
     } catch (error) {
-      console.error('Error creating default services:', error);
+      console.error('Error fetching first business:', error);
+    }
+    return null;
+  }
+  
+  async function initializeData(activeBizId: string) {
+    try {
+      // If we already have business data from route params, use it to initialize
+      if (businessId && businessName && !business) {
+        console.log('Using business data from route params to initialize');
+        setBusiness({
+          id: businessId,
+          name: businessName,
+          // Add other required fields with placeholder values
+          owner: '',
+          phoneNumber: '',
+          location: ''
+        } as unknown as Schema['Business']['type']);
+      }
+      
+      // Still fetch the full business details to ensure we have complete data
+      const businessResult = await client.models.Business.get({
+        id: activeBizId
+      });
+      
+      if (businessResult.errors) {
+        console.error('Error fetching business:', businessResult.errors);
+      } else if (businessResult.data) {
+        console.log('Fetched complete business data:', businessResult.data.name);
+        setBusiness(businessResult.data);
+      }
+
+      // Services and products are now initialized at app startup, not here
+    } catch (error) {
+      console.error('Error initializing data:', error);
+    } finally {
+      if (isMounted.current) {
+        setInitializing(false);
+      }
+    }
+  }
+
+  // Function to fetch all businesses from all users
+  const fetchAllBusinesses = async () => {
+    setLoadingBusinesses(true);
+    try {
+      // No filter to get all businesses
+      const result = await client.models.Business.list({
+        limit: 100 // Adjust as needed
+      });
+      
+      if (result.errors) {
+        console.error('Error fetching businesses:', result.errors);
+        Alert.alert('Error', 'Failed to fetch businesses');
+      } else if (result.data) {
+        setAllBusinesses(result.data);
+      }
+    } catch (error) {
+      console.error('Error fetching businesses:', error);
+      Alert.alert('Error', 'Failed to fetch businesses');
+    } finally {
+      setLoadingBusinesses(false);
     }
   };
-  
-  // Function to create default products for a service
-  const createDefaultProducts = async (serviceId: string, category: string, bizId: string) => {
+
+  // Function to select a business and switch to it
+  const selectBusiness = async (selectedBusiness: Schema['Business']['type']) => {
     try {
-      // Get products from the imported defaultProducts based on category
-      const productsForCategory = defaultProducts[category as keyof typeof defaultProducts] || [];
+      // Update state
+      setBusiness(selectedBusiness);
       
-      // Create each product
-      for (const productData of productsForCategory) {
-        await client.models.Product.create({
-          serviceID: serviceId,
-          businessID: bizId,
-          name: productData.name,
-          description: productData.description,
-          price: productData.price,
-          imageUrl: productData.imageUrl,
-          inventory: 999, // Large inventory for services
-          isActive: true
-        });
+      // Update navigation params
+      if (isMounted.current && isNavigationReady && nav && nav.setParams) {
+        try {
+          // Cast to any to avoid TypeScript errors with _hasBusinessData
+          nav.setParams({
+            _hasBusinessData: true,
+            businessId: selectedBusiness.id,
+            businessName: selectedBusiness.name
+          } as any);
+        } catch (error) {
+          console.log('Could not update navigation params:', error);
+        }
       }
+      
+      // Close modal
+      setBusinessSelectionModalVisible(false);
+      
+      // Reload dashboard with new business
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Dashboard', params: { businessId: selectedBusiness.id, businessName: selectedBusiness.name } }],
+      });
     } catch (error) {
-      console.error('Error creating default products:', error);
+      console.error('Error selecting business:', error);
+      Alert.alert('Error', 'Failed to switch business');
     }
   };
 
@@ -259,26 +260,36 @@ export default function Dashboard({ route }: DashboardScreenProps) {
   ];
 
   const navigateToScreen = (screenName: string) => {
-    // Handle specific screens with their proper types
-    switch (screenName) {
-      case 'ServiceManagement':
-        navigation.navigate('ServiceManagement', { businessId });
-        break;
-      case 'ProductManagement':
-        navigation.navigate('ProductManagement', { businessId });
-        break;
-      case 'OrderManagement':
-        navigation.navigate('OrderManagement', { businessId });
-        break;
-      case 'DataExport':
-        navigation.navigate('DataExport', { businessId });
-        break;
-      case 'Dashboard':
-        navigation.navigate('Dashboard', { businessId });
-        break;
-      default:
-        // Fallback for screens not yet implemented
-        Alert.alert('Navigation', `Screen ${screenName} not implemented yet`);
+    // Check if navigation is ready
+    if (!isNavigationReady || !nav) {
+      console.log(`Navigation not ready yet, cannot navigate to ${screenName}`);
+      return;
+    }
+    
+    try {
+      // Handle specific screens with their proper types
+      switch (screenName) {
+        case 'ServiceManagement':
+          nav.navigate('ServiceManagement', { businessId });
+          break;
+        case 'ProductManagement':
+          nav.navigate('ProductManagement', { businessId });
+          break;
+        case 'OrderManagement':
+          nav.navigate('OrderManagement', { businessId });
+          break;
+        case 'DataExport':
+          nav.navigate('DataExport', { businessId });
+          break;
+        case 'Dashboard':
+          nav.navigate('Dashboard', { businessId });
+          break;
+        default:
+          // Fallback for screens not yet implemented
+          Alert.alert('Navigation', `Screen ${screenName} not implemented yet`);
+      }
+    } catch (error) {
+      console.error(`Error navigating to ${screenName}:`, error);
     }
   };
 
@@ -302,8 +313,19 @@ export default function Dashboard({ route }: DashboardScreenProps) {
   return (
     <ScrollView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.businessName}>{business?.name || businessName || 'My Business'}</Text>
-        <Text style={styles.subtitle}>Dashboard</Text>
+        <View style={styles.businessHeader}>
+          <Text style={styles.businessName}>{businessName ? businessName.toUpperCase() : business?.name || 'My Business'}</Text>
+          <TouchableOpacity 
+            style={styles.switchBusinessButton}
+            onPress={() => {
+              fetchAllBusinesses();
+              setBusinessSelectionModalVisible(true);
+            }}
+          >
+            <Text style={styles.switchBusinessText}>Switch Business</Text>
+          </TouchableOpacity>
+        </View>
+        <Text style={styles.subtitle}>DASHBOARD</Text>
       </View>
 
       {/* Start Transaction Button */}
@@ -346,6 +368,66 @@ export default function Dashboard({ route }: DashboardScreenProps) {
           );
         })}
       </View>
+
+      {/* Business Selection Modal */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={businessSelectionModalVisible}
+        onRequestClose={() => setBusinessSelectionModalVisible(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Select Business</Text>
+            
+            {loadingBusinesses ? (
+              <ActivityIndicator size="large" color="#2196F3" style={styles.modalLoading} />
+            ) : (
+              <>
+                {allBusinesses.length === 0 ? (
+                  <Text style={styles.noBusinessesText}>No businesses found</Text>
+                ) : (
+                  <FlatList
+                    data={allBusinesses}
+                    keyExtractor={(item) => item.id}
+                    renderItem={({ item }) => (
+                      <TouchableOpacity
+                        style={[
+                          styles.businessItem,
+                          business?.id === item.id && styles.selectedBusinessItem
+                        ]}
+                        onPress={() => selectBusiness(item)}
+                      >
+                        <Text style={styles.businessItemName}>{item.name}</Text>
+                        {item.phoneNumber && <Text style={styles.businessItemPhone}>{item.phoneNumber}</Text>}
+                        {business?.id === item.id && (
+                          <Text style={styles.currentBusinessText}>Current</Text>
+                        )}
+                      </TouchableOpacity>
+                    )}
+                    style={styles.businessList}
+                  />
+                )}
+              </>
+            )}
+            
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={styles.modalCancelButton}
+                onPress={() => setBusinessSelectionModalVisible(false)}
+              >
+                <Text style={styles.modalButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalRefreshButton}
+                onPress={fetchAllBusinesses}
+              >
+                <Text style={styles.modalButtonText}>Refresh</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -383,10 +465,28 @@ const styles = StyleSheet.create({
     borderBottomColor: '#eaeaea',
     marginBottom: 15,
   },
+  businessHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 5,
+  },
   businessName: {
     fontSize: 24,
     fontWeight: 'bold',
     color: '#333',
+    flex: 1,
+  },
+  switchBusinessButton: {
+    backgroundColor: '#2196F3',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 4,
+  },
+  switchBusinessText: {
+    color: 'white',
+    fontWeight: '500',
+    fontSize: 12,
   },
   subtitle: {
     fontSize: 16,
@@ -434,5 +534,89 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#333',
     textAlign: 'center',
+  },
+  // Modal styles
+  modalContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    padding: 20,
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    borderRadius: 10,
+    padding: 20,
+    width: '90%',
+    maxHeight: '80%',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  modalLoading: {
+    marginVertical: 20,
+  },
+  businessList: {
+    maxHeight: 300,
+  },
+  businessItem: {
+    padding: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eaeaea',
+  },
+  selectedBusinessItem: {
+    backgroundColor: '#e3f2fd',
+  },
+  businessItemName: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#333',
+  },
+  businessItemPhone: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 4,
+  },
+  currentBusinessText: {
+    position: 'absolute',
+    right: 15,
+    top: 15,
+    fontSize: 12,
+    color: '#4CAF50',
+    fontWeight: 'bold',
+  },
+  noBusinessesText: {
+    textAlign: 'center',
+    color: '#666',
+    marginVertical: 20,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 20,
+  },
+  modalCancelButton: {
+    backgroundColor: '#757575',
+    padding: 10,
+    borderRadius: 5,
+    flex: 1,
+    marginRight: 10,
+    alignItems: 'center',
+  },
+  modalRefreshButton: {
+    backgroundColor: '#2196F3',
+    padding: 10,
+    borderRadius: 5,
+    flex: 1,
+    marginLeft: 10,
+    alignItems: 'center',
+  },
+  modalButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
   },
 });

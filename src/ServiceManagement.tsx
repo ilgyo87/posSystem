@@ -12,7 +12,6 @@ import {
   ScrollView,
 } from 'react-native';
 import { generateClient } from 'aws-amplify/data';
-import { Picker } from '@react-native-picker/picker';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { Schema } from '../amplify/data/resource';
 import type { RootStackParamList } from '../src/types';
@@ -22,19 +21,6 @@ const client = generateClient<Schema>();
 type ServiceType = Schema['Service']['type'];
 type ServiceCreateInput = Schema['Service']['createType'];
 type ServiceManagementProps = NativeStackScreenProps<RootStackParamList, 'ServiceManagement'>;
-
-type ServiceUpdateInput = Schema['Service']['updateType'];
-
-const SERVICE_CATEGORIES = [
-  'DRY_CLEANING',
-  'WASH_AND_FOLD',
-  'TAILORING',
-  'PRESSING',
-  'REPAIRS',
-  'SPECIALTY',
-] as const;
-
-type ServiceCategory = typeof SERVICE_CATEGORIES[number];
 
 export default function ServiceManagement({ route }: ServiceManagementProps) {
   const { businessId } = route.params;
@@ -47,7 +33,6 @@ export default function ServiceManagement({ route }: ServiceManagementProps) {
   const [description, setDescription] = useState('');
   const [basePrice, setBasePrice] = useState('');
   const [estimatedDuration, setEstimatedDuration] = useState('');
-  const [category, setCategory] = useState<ServiceCategory>('DRY_CLEANING');
 
   useEffect(() => {
     fetchServices();
@@ -74,7 +59,6 @@ export default function ServiceManagement({ route }: ServiceManagementProps) {
     setDescription('');
     setBasePrice('');
     setEstimatedDuration('');
-    setCategory('DRY_CLEANING');
     setEditingService(null);
   };
 
@@ -96,16 +80,14 @@ export default function ServiceManagement({ route }: ServiceManagementProps) {
         description,
         basePrice: parseFloat(basePrice),
         estimatedDuration: parseInt(estimatedDuration),
-        category,
       };
 
       if (editingService) {
         // Update existing service
-        const updateInput: ServiceUpdateInput = {
+        const result = await client.models.Service.update({
           id: editingService.id,
-          ...serviceData
-        };
-        const result = await client.models.Service.update(updateInput);
+          ...serviceData,
+        });
         if (result.errors) {
           Alert.alert('Error updating service', JSON.stringify(result.errors));
           return;
@@ -113,8 +95,7 @@ export default function ServiceManagement({ route }: ServiceManagementProps) {
         Alert.alert('Success', 'Service updated successfully');
       } else {
         // Create new service
-        const createInput: ServiceCreateInput = serviceData;
-        const result = await client.models.Service.create(createInput);
+        const result = await client.models.Service.create(serviceData);
         if (result.errors) {
           Alert.alert('Error creating service', JSON.stringify(result.errors));
           return;
@@ -137,7 +118,6 @@ export default function ServiceManagement({ route }: ServiceManagementProps) {
     setDescription(service.description || '');
     setBasePrice(service.basePrice.toString());
     setEstimatedDuration(service.estimatedDuration.toString());
-    setCategory(service.category as ServiceCategory);
     setModalVisible(true);
   };
 
@@ -158,33 +138,43 @@ export default function ServiceManagement({ route }: ServiceManagementProps) {
     }
   };
 
-  const renderItem = ({ item }: { item: ServiceType }) => (
-    <View style={styles.serviceItem}>
-      <View style={styles.serviceInfo}>
-        <Text style={styles.serviceName}>{item.name}</Text>
-        <Text style={styles.serviceCategory}>{item.category}</Text>
-        <Text>Price: ${item.basePrice.toFixed(2)}</Text>
-        <Text>Duration: {item.estimatedDuration} minutes</Text>
-        {item.description && (
-          <Text style={styles.description}>{item.description}</Text>
-        )}
+  const renderItem = ({ item }: { item: ServiceType }) => {
+    return (
+      <View style={styles.serviceItem}>
+        <View style={styles.serviceInfo}>
+          <Text style={styles.serviceName}>{item.name}</Text>
+          <Text>Price: ${item.basePrice.toFixed(2)}</Text>
+          <Text>Duration: {item.estimatedDuration} minutes</Text>
+          {item.description && (
+            <Text style={styles.description}>{item.description}</Text>
+          )}
+        </View>
+        <View style={styles.serviceActions}>
+          <TouchableOpacity
+            style={[styles.actionButton, styles.editButton]}
+            onPress={() => handleEdit(item)}
+          >
+            <Text style={styles.buttonText}>Edit</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.actionButton, styles.deleteButton]}
+            onPress={() => {
+              Alert.alert(
+                'Confirm Delete',
+                `Are you sure you want to delete ${item.name}?`,
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Delete', onPress: () => handleDelete(item.id), style: 'destructive' }
+                ]
+              );
+            }}
+          >
+            <Text style={styles.buttonText}>Delete</Text>
+          </TouchableOpacity>
+        </View>
       </View>
-      <View style={styles.serviceActions}>
-        <TouchableOpacity
-          style={[styles.actionButton, styles.editButton]}
-          onPress={() => handleEdit(item)}
-        >
-          <Text style={styles.buttonText}>Edit</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.actionButton, styles.deleteButton]}
-          onPress={() => handleDelete(item.id)}
-        >
-          <Text style={styles.buttonText}>Delete</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -230,19 +220,6 @@ export default function ServiceManagement({ route }: ServiceManagementProps) {
               multiline
               numberOfLines={3}
             />
-
-            <View style={styles.pickerContainer}>
-              <Text style={styles.label}>Category</Text>
-              <Picker
-                selectedValue={category}
-                onValueChange={(value: ServiceCategory) => setCategory(value)}
-                style={styles.picker}
-              >
-                {SERVICE_CATEGORIES.map((cat) => (
-                  <Picker.Item key={cat} label={cat.replace('_', ' ')} value={cat} />
-                ))}
-              </Picker>
-            </View>
             
             <TextInput
               style={styles.input}
@@ -320,10 +297,6 @@ const styles = StyleSheet.create({
   serviceName: {
     fontSize: 18,
     fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  serviceCategory: {
-    color: '#666',
     marginBottom: 4,
   },
   description: {

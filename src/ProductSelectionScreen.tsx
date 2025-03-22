@@ -32,9 +32,6 @@ type CartItem = {
   imageUrl?: string | null; // Add image URL for products
 };
 
-// Define service category type
-type ServiceCategory = 'DRY_CLEANING' | 'LAUNDRY' | 'ALTERATIONS';
-
 // Define service with products
 type ServiceWithProducts = {
   service: Schema['Service']['type'];
@@ -49,7 +46,6 @@ export default function ProductSelectionScreen({ route, navigation }: ProductSel
   const [loading, setLoading] = useState(true);
   const [services, setServices] = useState<ServiceWithProducts[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState<ServiceCategory>('DRY_CLEANING');
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Schema['Product']['type'] | null>(null);
   const [calendarVisible, setCalendarVisible] = useState(false);
@@ -78,9 +74,6 @@ export default function ProductSelectionScreen({ route, navigation }: ProductSel
       year: 'numeric'
     });
   };
-  
-  // Default service categories from types
-  const serviceCategories: ServiceCategory[] = ['DRY_CLEANING', 'LAUNDRY', 'ALTERATIONS'];
   
   useEffect(() => {
     if (!businessId) {
@@ -235,11 +228,6 @@ export default function ProductSelectionScreen({ route, navigation }: ProductSel
   const renderServiceItem = ({ item }: { item: ServiceWithProducts }) => {
     const { service, products } = item;
     
-    // Only show services that match the selected category
-    if (service.category !== selectedCategory) {
-      return null;
-    }
-    
     return (
       <View style={styles.serviceContainer}>
         <View style={styles.serviceHeader}>
@@ -252,7 +240,9 @@ export default function ProductSelectionScreen({ route, navigation }: ProductSel
           </TouchableOpacity>
         </View>
         
-        <Text style={styles.serviceDescription}>{service.description}</Text>
+        {service.description && (
+          <Text style={styles.serviceDescription}>{service.description}</Text>
+        )}
         <Text style={styles.servicePrice}>Base Price: ${service.basePrice.toFixed(2)}</Text>
         
         <Text style={styles.productsHeader}>Products:</Text>
@@ -279,8 +269,8 @@ export default function ProductSelectionScreen({ route, navigation }: ProductSel
                 <TouchableOpacity 
                   style={styles.addButton}
                   onPress={(e) => {
-                    e.stopPropagation(); // Prevent triggering the parent onPress
-                    addToCart(product, 'product', service.id);
+                    e.stopPropagation();
+                    addToCart(product, 'product', product.serviceID);
                   }}
                 >
                   <Text style={styles.addButtonText}>+ Add</Text>
@@ -388,29 +378,6 @@ export default function ProductSelectionScreen({ route, navigation }: ProductSel
       <View style={styles.content}>
         {/* Left side - Services and Products */}
         <View style={styles.servicesContainer}>
-          {/* Service category tabs */}
-          <View style={styles.categoryTabs}>
-            {serviceCategories.map((category) => (
-              <TouchableOpacity
-                key={category}
-                style={[
-                  styles.categoryTab,
-                  selectedCategory === category && styles.selectedCategoryTab
-                ]}
-                onPress={() => setSelectedCategory(category)}
-              >
-                <Text 
-                  style={[
-                    styles.categoryTabText,
-                    selectedCategory === category && styles.selectedCategoryTabText
-                  ]}
-                >
-                  {category.replace('_', ' ')}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-          
           {/* Services list */}
           <FlatList
             data={services}
@@ -419,8 +386,6 @@ export default function ProductSelectionScreen({ route, navigation }: ProductSel
             contentContainerStyle={styles.servicesList}
           />
         </View>
-        
-
         
         {/* Right side - Cart */}
         <View style={styles.cartContainer}>
@@ -711,29 +676,6 @@ const styles = StyleSheet.create({
     flex: 2,
     borderRightWidth: 1,
     borderRightColor: '#e1e1e1',
-  },
-  categoryTabs: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e1e1e1',
-  },
-  categoryTab: {
-    padding: 15,
-    flex: 1,
-    alignItems: 'center',
-  },
-  selectedCategoryTab: {
-    borderBottomWidth: 2,
-    borderBottomColor: '#2196F3',
-  },
-  categoryTabText: {
-    fontSize: 16,
-    color: '#666',
-  },
-  selectedCategoryTabText: {
-    color: '#2196F3',
-    fontWeight: 'bold',
   },
   servicesList: {
     padding: 15,

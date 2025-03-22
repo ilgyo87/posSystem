@@ -31,6 +31,56 @@ type ServiceWithProducts = {
   products: Schema['Product']['type'][];
 };
 
+// Function to extract category from description
+const getCategoryFromDescription = (description: string | null | undefined): ServiceCategory => {
+  if (!description) return 'DRY_CLEANING';
+  
+  // Look for category in format [CATEGORY:XXX]
+  const match = description.match(/\[CATEGORY:(.*?)\]/);
+  if (match && match[1] && ['DRY_CLEANING', 'LAUNDRY', 'ALTERATIONS'].includes(match[1] as ServiceCategory)) {
+    return match[1] as ServiceCategory;
+  }
+  
+  // If no category tag, try to determine from the name or description content
+  const descLower = description.toLowerCase();
+  if (descLower.includes('dry') || descLower.includes('clean')) {
+    return 'DRY_CLEANING';
+  } else if (descLower.includes('laundry') || descLower.includes('wash')) {
+    return 'LAUNDRY';
+  } else if (descLower.includes('alter') || descLower.includes('tailor')) {
+    return 'ALTERATIONS';
+  }
+  
+  return 'DRY_CLEANING';
+};
+
+// Function to get clean description without the category tag
+const getCleanDescription = (description: string | null | undefined): string => {
+  if (!description) return '';
+  return description.replace(/\[CATEGORY:.*?\]/, '').trim();
+};
+
+// Function to determine category based on service name
+const getServiceCategory = (name: string): string => {
+  const nameLower = name.toLowerCase();
+  if (nameLower.includes('dry') || nameLower.includes('clean')) {
+    return 'DRY_CLEANING';
+  } else if (nameLower.includes('laundry') || nameLower.includes('wash')) {
+    return 'LAUNDRY';
+  } else if (nameLower.includes('alter') || nameLower.includes('tailor')) {
+    return 'ALTERATIONS';
+  } else if (nameLower.includes('fold')) {
+    return 'WASH_AND_FOLD';
+  } else if (nameLower.includes('press')) {
+    return 'PRESSING';
+  } else if (nameLower.includes('repair')) {
+    return 'REPAIRS';
+  } else if (nameLower.includes('specialty')) {
+    return 'SPECIALTY';
+  }
+  return 'DRY_CLEANING';
+};
+
 export default function ProductManagement({ route }: ProductManagementProps) {
   const { businessId } = route.params;
   
@@ -118,8 +168,20 @@ export default function ProductManagement({ route }: ProductManagementProps) {
     try {
       // Create default services using the imported data
       for (const serviceData of defaultServices) {
+        // Include description with category tag to make filtering accurate
+        const serviceName = serviceData.name;
+        // Determine category using our utility function
+        const category = getServiceCategory(serviceName);
+        
+        // Create a version of service data without the category field for the API
+        const { category: categoryField, ...serviceDataWithoutCategory } = serviceData;
+        
+        // Add category tag to description for consistent filtering
+        const descriptionWithCategory = `[CATEGORY:${category}] ${serviceDataWithoutCategory.description}`;
+        
         const result = await client.models.Service.create({
-          ...serviceData,
+          ...serviceDataWithoutCategory,
+          description: descriptionWithCategory,
           businessID: businessId as string
         });
         
@@ -130,7 +192,7 @@ export default function ProductManagement({ route }: ProductManagementProps) {
         
         // Create default products for each service
         if (result.data?.id) {
-          await createDefaultProducts(result.data.id, serviceData.category);
+          await createDefaultProducts(result.data.id, category);
         } else {
           console.error('Error: Service ID is undefined');
         }
@@ -238,8 +300,18 @@ export default function ProductManagement({ route }: ProductManagementProps) {
   const renderServiceItem = ({ item }: { item: ServiceWithProducts }) => {
     const { service, products } = item;
     
+    // Determine service category based on the service name
+    const serviceCategory = service.name.toLowerCase().includes('wash') || 
+                           service.name.toLowerCase().includes('laundry') 
+      ? 'LAUNDRY'
+      : service.name.toLowerCase().includes('dry') || service.name.toLowerCase().includes('clean')
+      ? 'DRY_CLEANING'
+      : service.name.toLowerCase().includes('alter') || service.name.toLowerCase().includes('tailor')
+      ? 'ALTERATIONS'
+      : 'DRY_CLEANING';
+    
     // Only show services that match the selected category
-    if (service.category !== selectedCategory) {
+    if (serviceCategory !== selectedCategory) {
       return null;
     }
     

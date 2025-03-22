@@ -466,7 +466,8 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
                   qrCode: barcodeInput.trim(),
                   description: existingGarment.description || 'No description',
                   status: 'IN_PROGRESS',
-                  lastScanned: new Date().toISOString()
+                  lastScanned: new Date().toISOString(),
+                  type: existingGarment.type || 'CLOTHING' // Add required type field
                 });
 
                 if (garmentResult.errors || !garmentResult.data) {
@@ -564,7 +565,8 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
         qrCode: currentBarcode,
         description: description,
         status: 'IN_PROGRESS',
-        lastScanned: new Date().toISOString()
+        lastScanned: new Date().toISOString(),
+        type: 'CLOTHING' // Add required type field
       });
 
       if (garmentResult.errors || !garmentResult.data) {
@@ -727,7 +729,8 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
           transactionItemID: selectedItem.id,
           qrCode: qrCode,
           description: description,
-          status: 'PENDING'
+          status: 'PENDING',
+          type: 'CLOTHING' // Add required type field
         });
 
         if (garmentResult.errors || !garmentResult.data) {
@@ -813,7 +816,8 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
         transactionItemID: selectedItem.id,
         qrCode: editingGarment.qrCode,
         description: editDescription,
-        status: 'PENDING'
+        status: 'PENDING',
+        type: 'CLOTHING' // Add required type field
       });
 
       if (garmentResult.errors || !garmentResult.data) {

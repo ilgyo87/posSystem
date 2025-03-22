@@ -80,7 +80,7 @@ export default function CheckoutScreen({ route, navigation }: CheckoutScreenProp
       // Create transaction record
       const transactionResponse = await client.models.Transaction.create({
         businessID: businessId,
-        customerID: customerId,
+        customerID: customerId, // Using customerId directly
         status: 'PENDING',
         total: total,
         paymentMethod: paymentMethod,

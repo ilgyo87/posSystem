@@ -63,44 +63,99 @@ export default function BusinessCreate({ onBusinessCreated, isLoading = false }:
     }
   }
 
-  // Check if business name already exists
-  const checkBusinessNameExists = async (name: string): Promise<boolean> => {
+  // Check if business name and phone number combination already exists
+  const checkBusinessExists = async (name: string, phone: string): Promise<boolean> => {
+    if (!name || !phone) return false;
+    
     try {
-      // Query for businesses with the same name
-      const result = await client.models.Business.list({
-        filter: {
-          name: {
-            eq: name
-          }
-        }
-      });
+      // Format phone number for consistent comparison
+      const formattedPhone = formatPhoneNumber(phone);
       
-      if (result.errors) {
-        throw new Error(result.errors[0].message);
+      // Check if we have authentication
+      if (!user || !user.username) {
+        console.log('User not authenticated, skipping global check');
+        return false; // Skip the check if not authenticated
       }
       
-      // If any businesses with this name exist, return true
-      return result.data && result.data.length > 0;
+      // Use try-catch with fallback approach
+      try {
+        console.log('Attempting to check for existing business...');
+        // First try with explicit user pool auth mode
+        const result = await client.models.Business.list({
+          filter: {
+            name: { eq: name.trim() },
+            phoneNumber: { eq: formattedPhone }
+          },
+          authMode: "userPool"
+        });
+        
+        console.log('Check complete, found matches:', result.data?.length || 0);
+        return result.data && result.data.length > 0;
+      } catch (innerError) {
+        // If we get auth error, try without specifying authMode
+        if (innerError instanceof Error && innerError.message.includes('No current user')) {
+          console.log('Auth error, trying without explicit authMode...');
+          const fallbackResult = await client.models.Business.list({
+            filter: {
+              name: { eq: name.trim() },
+              phoneNumber: { eq: formattedPhone }
+            }
+          });
+          
+          return fallbackResult.data && fallbackResult.data.length > 0;
+        }
+        throw innerError; // Re-throw if it's not an auth error
+      }
     } catch (error) {
-      console.error("Error checking business name:", error);
-      return false; // On error, allow the creation to proceed
+      console.error("Error checking business existence:", error);
+      
+      // For NoSignedUser errors, we'll assume no duplicate exists
+      if (error instanceof Error && 
+         (error.message.includes('No current user') || 
+          error.message.includes('NoSignedUser'))) {
+        console.log('Authentication error occurred, proceeding with creation');
+        return false;
+      }
+      
+      // For other errors, we'll show an error but still allow creation
+      console.warn('Non-auth error occurred during check:', error);
+      return false;
     }
   };
   
-  // Validate business name as user types
+  // Validate business name and phone number combination
+  const validateBusiness = async (name: string, phone: string) => {
+    if (name.length >= 3 && phone.length >= 10) {
+      const exists = await checkBusinessExists(name, phone);
+      if (exists) {
+        setNameError("A business with this name and phone number already exists. Please use different information.");
+        return false;
+      }
+      setNameError("");
+      return true;
+    }
+    return true; // Don't show error if fields are not complete yet
+  };
+  
+  // Update the validateBusinessName function to also check phone number if available
   const validateBusinessName = async (name: string) => {
     setBusinessName(name);
     setNameError(""); // Clear any existing errors
     
-    // Only check for uniqueness if the name is at least 3 characters
-    if (name.length >= 3) {
-      const exists = await checkBusinessNameExists(name);
-      if (exists) {
-        setNameError("This business name is already taken. Please choose another name.");
-      }
+    if (name.length >= 3 && phoneNumber.length >= 10) {
+      await validateBusiness(name, phoneNumber);
     }
   };
   
+  // Add phone number validation
+  const handlePhoneNumberChange = async (phone: string) => {
+    setPhoneNumber(phone);
+    
+    if (businessName.length >= 3 && phone.length >= 10) {
+      await validateBusiness(businessName, phone);
+    }
+  };
+
   const createBusiness = async () => {
     // Clear any existing errors
     setNameError("");
@@ -110,18 +165,31 @@ export default function BusinessCreate({ onBusinessCreated, isLoading = false }:
       return
     }
     
-    // Check if business name already exists
-    const nameExists = await checkBusinessNameExists(businessName);
-    if (nameExists) {
-      setNameError("This business name is already taken. Please choose another name.");
+    // Make sure we have an authenticated user
+    if (!user || !user.username) {
+      Alert.alert("Authentication Error", "You must be signed in to create a business. Please sign in and try again.");
       return;
     }
-
+    
     // Format phone number before submission
     const formattedPhone = formatPhoneNumber(phoneNumber)
     if (formattedPhone.length < 10) {
       Alert.alert("Error", "Please enter a valid phone number")
       return
+    }
+    
+    // Best-effort check for existing businesses
+    let exists = false;
+    try {
+      exists = await checkBusinessExists(businessName, formattedPhone);
+    } catch (error) {
+      console.warn('Error during existence check, proceeding anyway:', error);
+      // We'll proceed with creation even if the check fails
+    }
+    
+    if (exists) {
+      setNameError("A business with this name and phone number already exists. Please use different information.");
+      return;
     }
 
     setIsCreating(true)
@@ -130,40 +198,54 @@ export default function BusinessCreate({ onBusinessCreated, isLoading = false }:
       // Generate a unique ID for the business
       const businessId = uuidv4();
       
-      // Create business object
+      // Create business with owner field
       const newBusiness = {
         id: businessId,
         name: businessName,
         phoneNumber: formattedPhone,
-        location: location || undefined
+        location: location || undefined,
+        owner: user.username // Set owner to current user's username
       };
       
-      // Save to Amplify Data API
-      const result = await client.models.Business.create(newBusiness);
+      console.log("Creating business with ID:", businessId, "for owner:", user.username);
       
-      if (result.errors) {
+      // Create the business - try different auth approaches if needed
+      let result;
+      try {
+        // First try with explicit userPool auth
+        result = await client.models.Business.create(newBusiness, {
+          authMode: "userPool"
+        });
+      } catch (authError) {
+        // If that fails, try without specifying auth mode
+        if (authError instanceof Error && authError.message.includes('No current user')) {
+          console.log('Auth error during creation, trying without explicit authMode...');
+          result = await client.models.Business.create(newBusiness);
+        } else {
+          throw authError; // Re-throw if it's not an auth error
+        }
+      }
+      
+      if (result && result.errors) {
         throw new Error(result.errors[0].message);
       }
       
       setIsCreating(false);
       
-      console.log('Business created successfully, navigating to Dashboard');
+      console.log('Business created successfully');
       
-      // IMPORTANT: First call the onBusinessCreated callback with the new business
-      // This updates the parent component's state and hides the modal
-      if (onBusinessCreated && result.data) {
-        console.log('Calling onBusinessCreated to update parent state');
+      // Call the callback to update parent state
+      if (onBusinessCreated && result && result.data) {
+        console.log('Calling onBusinessCreated with new business');
         onBusinessCreated(result.data);
         
-        // Add a longer delay to ensure state updates are processed
-        // This helps prevent the modal from reappearing
-        await new Promise(resolve => setTimeout(resolve, 300));
+        // Add delay to ensure state updates are processed
+        await new Promise(resolve => setTimeout(resolve, 500));
       }
       
-      // Force immediate navigation to Dashboard
-      // This ensures we completely reset the navigation stack
+      // Navigate to Dashboard
       if (navigation && navigation.reset) {
-        console.log('Forcing immediate navigation to Dashboard');
+        console.log('Navigating to Dashboard');
         navigation.reset({
           index: 0,
           routes: [{ name: 'Dashboard', params: { businessId: businessId, businessName: businessName } }],
@@ -197,10 +279,10 @@ export default function BusinessCreate({ onBusinessCreated, isLoading = false }:
       {nameError ? <Text style={styles.errorText}>{nameError}</Text> : null}
       <TextInput
         ref={phoneNumberRef}
-        style={styles.input}
+        style={[styles.input, nameError ? styles.inputError : null]}
         placeholder="Phone Number (e.g., 555-555-5555)"
         value={phoneNumber}
-        onChangeText={setPhoneNumber}
+        onChangeText={handlePhoneNumberChange}
         keyboardType="phone-pad"
         returnKeyType="next"
         onSubmitEditing={() => locationRef.current?.focus()}
