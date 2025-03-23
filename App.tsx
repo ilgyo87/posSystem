@@ -387,11 +387,11 @@ function AppContent() {
       await checkAndInitializeServices(business.id);
       console.log('Services checked/initialized');
       
-      // Hide the modal flag
+      // IMPORTANT: Set this flag to false to prevent showing the business creation screen again
       setShowBusinessModal(false);
       
-      // We don't need to navigate here - just update the initialRouteName
-      // by changing the showBusinessModal state to false
+      // Force a refresh of the business check to ensure we don't show the modal again
+      await checkForBusiness();
     } catch (error) {
       console.error('Error in business creation process:', error);
     }
@@ -409,7 +409,10 @@ function AppContent() {
   return (
     <>
 
-      <Stack.Navigator initialRouteName={showBusinessModal ? 'BusinessCreate' : 'Dashboard'}>
+      <Stack.Navigator
+        key={`nav-${showBusinessModal}-${businessData?.id || 'none'}`}
+        initialRouteName={showBusinessModal ? 'BusinessCreate' : 'Dashboard'}
+      >
           <Stack.Screen 
             name="BusinessCreate" 
             options={{
