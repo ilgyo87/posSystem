@@ -1,5 +1,5 @@
 import React, { useState } from "react"
-import { View, Text, TextInput, Button, Alert, StyleSheet, Platform, ActivityIndicator } from "react-native"
+import { View, Text, TextInput, TouchableOpacity, Alert, StyleSheet, Platform, ActivityIndicator, Modal } from "react-native"
 import { useAuthenticator } from "@aws-amplify/ui-react-native"
 import { useNavigation } from "@react-navigation/native"
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack"
@@ -41,6 +41,7 @@ export default function BusinessCreate({ onBusinessCreated, isLoading = false }:
   const [location, setLocation] = useState("")
   const [isCreating, setIsCreating] = useState(false)
   const [nameError, setNameError] = useState("") // For business name validation errors
+  const [modalVisible, setModalVisible] = useState(true) // Modal is always visible in this component
   
   // Create refs for input fields to enable tabbing
   const businessNameRef = React.useRef<TextInput>(null)
@@ -258,84 +259,126 @@ export default function BusinessCreate({ onBusinessCreated, isLoading = false }:
     }
   }
 
+  // Reset form function similar to customer creation
+  const resetForm = () => {
+    setBusinessName("");
+    setPhoneNumber("");
+    setLocation("");
+    setNameError("");
+  };
+
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Create a New Business</Text>
-      <TextInput
-        ref={businessNameRef}
-        style={[styles.input, nameError ? styles.inputError : null]}
-        placeholder="Business Name"
-        value={businessName}
-        onChangeText={validateBusinessName}
-        returnKeyType="next"
-        onSubmitEditing={() => phoneNumberRef.current?.focus()}
-        blurOnSubmit={false}
-        autoFocus={true}
-        onKeyPress={(e) => handleKeyPress(e, phoneNumberRef)}
-        textContentType="organizationName"
-        accessibilityLabel="Business Name"
-        autoComplete="organization"
-      />
-      {nameError ? <Text style={styles.errorText}>{nameError}</Text> : null}
-      <TextInput
-        ref={phoneNumberRef}
-        style={[styles.input, nameError ? styles.inputError : null]}
-        placeholder="Phone Number (e.g., 555-555-5555)"
-        value={phoneNumber}
-        onChangeText={handlePhoneNumberChange}
-        keyboardType="phone-pad"
-        returnKeyType="next"
-        onSubmitEditing={() => locationRef.current?.focus()}
-        blurOnSubmit={false}
-        onKeyPress={(e) => handleKeyPress(e, locationRef)}
-        textContentType="telephoneNumber"
-        accessibilityLabel="Phone Number"
-        autoComplete="tel"
-      />
-      <TextInput
-        ref={locationRef}
-        style={styles.input}
-        placeholder="Location (Optional)"
-        value={location}
-        onChangeText={setLocation}
-        returnKeyType="done"
-        onSubmitEditing={createBusiness}
-        onKeyPress={(e) => handleKeyPress(e, null)}
-        textContentType="fullStreetAddress"
-        accessibilityLabel="Location"
-        autoComplete="street-address"
-      />
-      <Button 
-        title={isCreating ? "Creating..." : "Create Business"} 
-        onPress={createBusiness}
-        disabled={isCreating} 
-      />
-      {isCreating && <ActivityIndicator style={styles.loader} />}
-    </View>
+    <Modal
+      animationType="slide"
+      transparent={true}
+      visible={modalVisible}
+      onRequestClose={() => {
+        // This would typically close the modal, but in this case we keep it open
+        // as it's the main component
+      }}
+    >
+      <View style={styles.modalContainer}>
+        <View style={styles.modalContent}>
+          <Text style={styles.modalTitle}>Create New Business</Text>
+          
+          <TextInput
+            ref={businessNameRef}
+            style={[styles.input, nameError ? styles.inputError : null]}
+            placeholder="Business Name *"
+            value={businessName}
+            onChangeText={validateBusinessName}
+            returnKeyType="next"
+            onSubmitEditing={() => phoneNumberRef.current?.focus()}
+            blurOnSubmit={false}
+            autoFocus={true}
+            onKeyPress={(e) => handleKeyPress(e, phoneNumberRef)}
+            textContentType="organizationName"
+            accessibilityLabel="Business Name"
+            autoComplete="organization"
+          />
+          {nameError ? <Text style={styles.errorText}>{nameError}</Text> : null}
+          
+          <TextInput
+            ref={phoneNumberRef}
+            style={[styles.input, nameError ? styles.inputError : null]}
+            placeholder="Phone Number * (e.g., 555-555-5555)"
+            value={phoneNumber}
+            onChangeText={handlePhoneNumberChange}
+            keyboardType="phone-pad"
+            returnKeyType="next"
+            onSubmitEditing={() => locationRef.current?.focus()}
+            blurOnSubmit={false}
+            onKeyPress={(e) => handleKeyPress(e, locationRef)}
+            textContentType="telephoneNumber"
+            accessibilityLabel="Phone Number"
+            autoComplete="tel"
+          />
+          
+          <TextInput
+            ref={locationRef}
+            style={styles.input}
+            placeholder="Location (Optional)"
+            value={location}
+            onChangeText={setLocation}
+            returnKeyType="done"
+            onSubmitEditing={createBusiness}
+            onKeyPress={(e) => handleKeyPress(e, null)}
+            textContentType="fullStreetAddress"
+            accessibilityLabel="Location"
+            autoComplete="street-address"
+          />
+          
+          {isCreating && <ActivityIndicator style={styles.loader} color="#2196F3" />}
+          
+          <View style={styles.modalButtons}>
+            {/* Cancel button is not functional in this context since we need to create a business */}
+            <TouchableOpacity
+              style={[styles.modalButton, styles.cancelButton]}
+              disabled={isCreating}
+            >
+              <Text style={styles.cancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={[styles.modalButton, styles.saveButton]}
+              onPress={createBusiness}
+              disabled={isCreating}
+            >
+              <Text style={styles.saveButtonText}>{isCreating ? "Creating..." : "Create"}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
   )
 }
 
 const styles = StyleSheet.create({
-  container: {
-    padding: 20,
-    backgroundColor: '#fff',
+  modalContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
-  title: {
-    fontSize: 24,
+  modalContent: {
+    backgroundColor: 'white',
+    borderRadius: 8,
+    padding: 20,
+    width: '90%',
+    maxWidth: 500,
+  },
+  modalTitle: {
+    fontSize: 20,
     fontWeight: 'bold',
-    marginBottom: 20,
+    marginBottom: 16,
     textAlign: 'center',
   },
   input: {
-    height: 50,
-    borderColor: '#999',
     borderWidth: 1,
-    borderRadius: 5,
-    marginBottom: 15,
-    paddingHorizontal: 10,
-    backgroundColor: '#f9f9f9',
-    fontSize: 16,
-    color: '#000',
+    borderColor: '#ddd',
+    borderRadius: 4,
+    padding: 12,
+    marginBottom: 16,
   },
   inputError: {
     borderColor: '#ff3b30',
@@ -347,7 +390,35 @@ const styles = StyleSheet.create({
     marginBottom: 15,
     fontSize: 14,
   },
-  loader: {
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     marginTop: 20,
+  },
+  modalButton: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 4,
+    alignItems: 'center',
+  },
+  cancelButton: {
+    backgroundColor: '#f5f5f5',
+    marginRight: 8,
+  },
+  cancelButtonText: {
+    color: '#333',
+  },
+  saveButton: {
+    backgroundColor: '#4CAF50',
+    marginLeft: 8,
+  },
+  saveButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  loader: {
+    marginTop: 10,
+    marginBottom: 10,
+    alignSelf: 'center',
   },
 })

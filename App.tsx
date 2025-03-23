@@ -414,7 +414,7 @@ function AppContent() {
   }
   
   return (
-    <NavigationContainer>
+    <>
       {/* Business Creation Modal - only show if shouldShowModal is true */}
       {shouldShowModal && (
         <View style={modalStyles.modalContainer}>
@@ -534,16 +534,18 @@ function AppContent() {
           options={{ title: "Completed Order" }}
         />
       </Stack.Navigator>
-    </NavigationContainer>
+    </>
   )
 }
 
 export default function App() {
   return (
     <SafeAreaProvider>
-      <Authenticator.Provider>
-        <AppWithAuth />
-      </Authenticator.Provider>
+      <NavigationContainer>
+        <Authenticator.Provider>
+          <AppWithAuth />
+        </Authenticator.Provider>
+      </NavigationContainer>
     </SafeAreaProvider>
   )
 }
