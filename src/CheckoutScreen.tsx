@@ -77,10 +77,49 @@ export default function CheckoutScreen({ route, navigation }: CheckoutScreenProp
     setLoading(true);
     
     try {
-      // Create transaction record
+      // Get or create the order counter for this business
+      let orderNumber = 1; // Default start at 1
+      
+      // Try to find an existing counter
+      const counterResponse = await client.models.Counter.list({
+        filter: {
+          and: [
+            { businessID: { eq: businessId } },
+            { name: { eq: 'orderCounter' } }
+          ]
+        }
+      });
+      
+      let counter;
+      
+      if (counterResponse.data && counterResponse.data.length > 0) {
+        // Counter exists, increment it
+        counter = counterResponse.data[0];
+        orderNumber = counter.value + 1;
+        
+        // Update the counter
+        await client.models.Counter.update({
+          id: counter.id,
+          value: orderNumber
+        });
+      } else {
+        // Create a new counter starting at 1
+        const newCounterResponse = await client.models.Counter.create({
+          name: 'orderCounter',
+          value: 1,
+          businessID: businessId
+        });
+        
+        if (!newCounterResponse.data) {
+          throw new Error('Failed to create counter');
+        }
+      }
+      
+      // Create transaction record with the order number
       const transactionResponse = await client.models.Transaction.create({
         businessID: businessId,
         customerID: customerId, // Using customerId directly
+        orderNumber: orderNumber, // Set the sequential order number
         status: 'PENDING',
         total: total,
         paymentMethod: paymentMethod,

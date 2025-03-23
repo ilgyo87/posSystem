@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { productManagementStyles as styles } from './styles/productManagement.styles';
 import { commonStyles } from './styles/common.styles';
-import { defaultServices, defaultProducts } from './data/defaultData';
+// No longer using predefined data
 import { generateClient } from 'aws-amplify/data';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { Schema } from '../amplify/data/resource';
@@ -69,14 +69,6 @@ const getServiceCategory = (name: string): string => {
     return 'LAUNDRY';
   } else if (nameLower.includes('alter') || nameLower.includes('tailor')) {
     return 'ALTERATIONS';
-  } else if (nameLower.includes('fold')) {
-    return 'WASH_AND_FOLD';
-  } else if (nameLower.includes('press')) {
-    return 'PRESSING';
-  } else if (nameLower.includes('repair')) {
-    return 'REPAIRS';
-  } else if (nameLower.includes('specialty')) {
-    return 'SPECIALTY';
   }
   return 'DRY_CLEANING';
 };
@@ -86,7 +78,7 @@ export default function ProductManagement({ route }: ProductManagementProps) {
   
   const [loading, setLoading] = useState(true);
   const [services, setServices] = useState<ServiceWithProducts[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState<ServiceCategory>('DRY_CLEANING');
+  const [selectedService, setSelectedService] = useState<string>('');
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Schema['Product']['type'] | null>(null);
@@ -98,9 +90,21 @@ export default function ProductManagement({ route }: ProductManagementProps) {
   // Get window dimensions for responsive layout
   const { width, height } = useWindowDimensions();
   
-  // Default service categories
-  const serviceCategories: ServiceCategory[] = ['DRY_CLEANING', 'LAUNDRY', 'ALTERATIONS'];
-  
+  // List of service names to display
+  const [serviceNames, setServiceNames] = useState<string[]>([]);
+
+  // Helper function to extract unique service names to use as categories
+  const extractServiceNames = (services: ServiceWithProducts[]): string[] => {
+    return services.map(s => s.service.name);
+  };
+
+  const [serviceModalVisible, setServiceModalVisible] = useState(false);
+  const [serviceModalMode, setServiceModalMode] = useState<'add' | 'edit'>('add');
+  const [editingService, setEditingService] = useState<Schema['Service']['type'] | null>(null);
+  const [newServiceName, setNewServiceName] = useState('');
+  const [newServiceDescription, setNewServiceDescription] = useState('');
+  const [newServiceBasePrice, setNewServiceBasePrice] = useState('');
+
   useEffect(() => {
     if (!businessId) {
       Alert.alert('Error', 'Business ID is required');
@@ -111,51 +115,49 @@ export default function ProductManagement({ route }: ProductManagementProps) {
   }, [businessId]);
   
   const fetchServicesAndProducts = async () => {
-    setLoading(true);
     try {
-      // Fetch services for this business
+      setLoading(true);
+
       const servicesResult = await client.models.Service.list({
-        filter: { businessID: { eq: businessId as string } }
+        filter: { businessID: { eq: businessId } }
       });
       
-      if (servicesResult.errors) {
-        console.error('Error fetching services:', servicesResult.errors);
-        Alert.alert('Error', 'Failed to fetch services');
-        setLoading(false);
-        return;
-      }
-      
-      const servicesData = servicesResult.data ?? [];
-      
-      // If no services exist, create default services
-      if (servicesData.length === 0) {
-        await createDefaultServices();
-        // Fetch again after creating defaults
-        fetchServicesAndProducts();
-        return;
-      }
+      // Sort services by createdAt (oldest first)
+      const servicesData = (servicesResult.data ?? []).sort((a, b) => {
+        const dateA = new Date(a.createdAt || 0).getTime();
+        const dateB = new Date(b.createdAt || 0).getTime();
+        return dateA - dateB; // ascending order (oldest first)
+      });
       
       // For each service, fetch related products
       const servicesWithProducts: ServiceWithProducts[] = [];
       
       for (const service of servicesData) {
-        // Fetch products for this service
         const productsResult = await client.models.Product.list({
           filter: { serviceID: { eq: service.id } }
         });
         
-        if (productsResult.errors) {
-          console.error('Error fetching products for service:', service.id, productsResult.errors);
-          continue;
-        }
+        // Sort products by createdAt (oldest first)
+        const sortedProducts = (productsResult.data ?? []).sort((a, b) => {
+          const dateA = new Date(a.createdAt || 0).getTime();
+          const dateB = new Date(b.createdAt || 0).getTime();
+          return dateA - dateB; // ascending order (oldest first)
+        });
         
         servicesWithProducts.push({
           service,
-          products: productsResult.data ?? []
+          products: sortedProducts
         });
       }
       
       setServices(servicesWithProducts);
+      const names = extractServiceNames(servicesWithProducts);
+      setServiceNames(names);
+      
+      // Set the first service as selected if we have services and none is selected
+      if (names.length > 0 && (!selectedService || !names.includes(selectedService))) {
+        setSelectedService(names[0]);
+      }
     } catch (error) {
       console.error('Error fetching services and products:', error);
       Alert.alert('Error', 'Failed to fetch services and products');
@@ -164,69 +166,134 @@ export default function ProductManagement({ route }: ProductManagementProps) {
     }
   };
   
-  const createDefaultServices = async () => {
+  const handleSaveService = async () => {
     try {
-      // Create default services using the imported data
-      for (const serviceData of defaultServices) {
-        // Include description with category tag to make filtering accurate
-        const serviceName = serviceData.name;
-        // Determine category using our utility function
-        const category = getServiceCategory(serviceName);
-        
-        // Create a version of service data without the category field for the API
-        const { category: categoryField, ...serviceDataWithoutCategory } = serviceData;
-        
-        // Add category tag to description for consistent filtering
-        const descriptionWithCategory = `[CATEGORY:${category}] ${serviceDataWithoutCategory.description}`;
-        
+      if (!newServiceName.trim()) {
+        Alert.alert('Error', 'Service name is required');
+        return;
+      }
+
+      const basePrice = parseFloat(newServiceBasePrice);
+      if (isNaN(basePrice)) {
+        Alert.alert('Error', 'Please enter a valid base price');
+        return;
+      }
+
+      if (serviceModalMode === 'add') {
+        // Create new service
         const result = await client.models.Service.create({
-          ...serviceDataWithoutCategory,
-          description: descriptionWithCategory,
-          businessID: businessId as string
+          name: newServiceName,
+          description: newServiceDescription,
+          basePrice,
+          businessID: businessId as string,
+          estimatedDuration: 60 // Default duration in minutes
         });
         
         if (result.errors) {
-          console.error('Error creating default service:', result.errors);
-          continue;
+          console.error('Error creating service:', result.errors);
+          Alert.alert('Error', 'Failed to create service');
+          return;
         }
         
-        // Create default products for each service
-        if (result.data?.id) {
-          await createDefaultProducts(result.data.id, category);
-        } else {
-          console.error('Error: Service ID is undefined');
+        Alert.alert('Success', 'Service created successfully');
+      } else if (serviceModalMode === 'edit' && editingService) {
+        // Update existing service
+        const result = await client.models.Service.update({
+          id: editingService.id,
+          name: newServiceName,
+          description: newServiceDescription,
+          basePrice
+        });
+        
+        if (result.errors) {
+          console.error('Error updating service:', result.errors);
+          Alert.alert('Error', 'Failed to update service');
+          return;
         }
+        
+        Alert.alert('Success', 'Service updated successfully');
       }
       
-      Alert.alert('Success', 'Default services and products created');
+      // Clear form and close modal
+      resetServiceForm();
+      setServiceModalVisible(false);
+      
+      // Refresh the services list
+      fetchServicesAndProducts();
     } catch (error) {
-      console.error('Error creating default services:', error);
-      Alert.alert('Error', 'Failed to create default services');
+      console.error('Error saving service:', error);
+      Alert.alert('Error', 'Failed to save service');
     }
   };
   
-  const createDefaultProducts = async (serviceId: string, category: string) => {
+  const resetServiceForm = () => {
+    setNewServiceName('');
+    setNewServiceDescription('');
+    setNewServiceBasePrice('');
+    setEditingService(null);
+  };
+  
+  const handleEditService = (service: Schema['Service']['type']) => {
+    setEditingService(service);
+    setNewServiceName(service.name);
+    setNewServiceDescription(service.description || '');
+    setNewServiceBasePrice(service.basePrice.toString());
+    setServiceModalMode('edit');
+    setServiceModalVisible(true);
+  };
+  
+  const handleAddNewService = () => {
+    resetServiceForm();
+    setServiceModalMode('add');
+    setServiceModalVisible(true);
+  };
+  
+  const handleDeleteService = async (serviceId: string) => {
     try {
-      // Get products from the imported defaultProducts based on category
-      const productsForCategory = defaultProducts[category as keyof typeof defaultProducts] || [];
-      
-      // Create each product
-      for (const productData of productsForCategory) {
-        await client.models.Product.create({
-          serviceID: serviceId,
-          businessID: businessId as string,
-          name: productData.name,
-          description: productData.description,
-          price: productData.price,
-          imageUrl: productData.imageUrl,
-          inventory: 999, // Unlimited inventory for services
-          isActive: true
-        });
-      }
+      // Confirm deletion
+      Alert.alert(
+        'Confirm Deletion',
+        'Are you sure you want to delete this service? This will also delete all products associated with this service.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: async () => {
+              // First delete all products associated with this service
+              const productsResult = await client.models.Product.list({
+                filter: { serviceID: { eq: serviceId } }
+              });
+              
+              if (productsResult.data) {
+                for (const product of productsResult.data) {
+                  await client.models.Product.delete({ id: product.id });
+                }
+              }
+              
+              // Then delete the service
+              const result = await client.models.Service.delete({ id: serviceId });
+              
+              if (result.errors) {
+                console.error('Error deleting service:', result.errors);
+                Alert.alert('Error', 'Failed to delete service');
+                return;
+              }
+              
+              // Refresh the services list
+              fetchServicesAndProducts();
+              Alert.alert('Success', 'Service deleted successfully');
+            }
+          }
+        ]
+      );
     } catch (error) {
-      console.error('Error creating default products:', error);
+      console.error('Error deleting service:', error);
+      Alert.alert('Error', 'Failed to delete service');
     }
   };
+  
+  // We're no longer using default products as we're creating services individually
   
   const handleViewProductDetails = (product: Schema['Product']['type']) => {
     setSelectedProduct(product);
@@ -243,8 +310,6 @@ export default function ProductManagement({ route }: ProductManagementProps) {
   };
   
   const handleSaveProduct = async () => {
-    if (!selectedProduct) return;
-    
     try {
       const price = parseFloat(newProductPrice);
       if (isNaN(price)) {
@@ -252,23 +317,102 @@ export default function ProductManagement({ route }: ProductManagementProps) {
         return;
       }
       
-      await client.models.Product.update({
-        id: selectedProduct.id,
-        name: newProductName,
-        description: newProductDescription,
-        price,
-        imageUrl: newProductImageUrl,
-      });
+      if (!newProductName.trim()) {
+        Alert.alert('Error', 'Product name is required');
+        return;
+      }
+      
+      // Check if we're adding a new product or updating existing one
+      if (!selectedProduct?.id) {
+        // Adding a new product
+        const serviceId = selectedProduct?.serviceID;
+        if (!serviceId) {
+          Alert.alert('Error', 'Service ID is missing');
+          return;
+        }
+        
+        // New product will be added to the end of the list as it will have the latest creation timestamp
+        await client.models.Product.create({
+          serviceID: serviceId,
+          businessID: businessId as string,
+          name: newProductName,
+          description: newProductDescription,
+          price,
+          imageUrl: newProductImageUrl,
+          inventory: 999, // Default inventory
+          isActive: true
+        });
+        
+        Alert.alert('Success', 'Product created successfully');
+      } else {
+        // Updating existing product
+        await client.models.Product.update({
+          id: selectedProduct.id,
+          name: newProductName,
+          description: newProductDescription,
+          price,
+          imageUrl: newProductImageUrl,
+        });
+        
+        Alert.alert('Success', 'Product updated successfully');
+      }
       
       setEditModalVisible(false);
       fetchServicesAndProducts(); // Refresh the list
-      Alert.alert('Success', 'Product updated successfully');
     } catch (error) {
-      console.error('Error updating product:', error);
-      Alert.alert('Error', 'Failed to update product');
+      console.error('Error saving product:', error);
+      Alert.alert('Error', 'Failed to save product');
     }
   };
   
+  const handleAddProduct = (serviceId: string) => {
+    // Set up for adding a new product
+    setNewProductName('');
+    setNewProductDescription('');
+    setNewProductPrice('');
+    setNewProductImageUrl('');
+    // Create a placeholder product with default values to avoid errors
+    setSelectedProduct({ 
+      id: '', 
+      serviceID: serviceId,
+      name: '',
+      price: 0, // Add default price to avoid toFixed errors
+      description: '',
+      imageUrl: ''
+    } as Schema['Product']['type']);
+    setEditModalVisible(true);
+  };
+
+  const handleDeleteProduct = async (productId: string) => {
+    // Confirm before deleting
+    Alert.alert(
+      'Confirm Delete',
+      'Are you sure you want to delete this product?',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel'
+        },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await client.models.Product.delete({
+                id: productId
+              });
+              fetchServicesAndProducts(); // Refresh the list
+              Alert.alert('Success', 'Product deleted successfully');
+            } catch (error) {
+              console.error('Error deleting product:', error);
+              Alert.alert('Error', 'Failed to delete product');
+            }
+          }
+        }
+      ]
+    );
+  };
+
   const renderProductItem = ({ item }: { item: Schema['Product']['type'] }) => (
     <TouchableOpacity 
       style={[commonStyles.productItem, { width: (width / Math.floor(width / 180)) - 15 }]}
@@ -283,55 +427,125 @@ export default function ProductManagement({ route }: ProductManagementProps) {
       )}
       <View style={commonStyles.productInfo}>
         <Text style={commonStyles.productName} numberOfLines={1}>{item.name}</Text>
-        <Text style={commonStyles.productPrice}>${item.price.toFixed(2)}</Text>
+        <Text style={commonStyles.productPrice}>${typeof item.price === 'number' ? item.price.toFixed(2) : '0.00'}</Text>
       </View>
-      <TouchableOpacity 
-        style={styles.editButton}
-        onPress={(e) => {
-          e.stopPropagation(); // Prevent triggering the parent onPress
-          handleEditProduct(item);
-        }}
-      >
-        <Text style={styles.editButtonText}>Edit</Text>
-      </TouchableOpacity>
+      <View style={styles.productButtonsContainer}>
+        <TouchableOpacity 
+          style={styles.editButton}
+          onPress={(e) => {
+            e.stopPropagation(); // Prevent triggering the parent onPress
+            handleEditProduct(item);
+          }}
+        >
+          <Text style={styles.editButtonText}>Edit</Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={styles.deleteButton}
+          onPress={(e) => {
+            e.stopPropagation(); // Prevent triggering the parent onPress
+            handleDeleteProduct(item.id);
+          }}
+        >
+          <Text style={styles.deleteButtonText}>Delete</Text>
+        </TouchableOpacity>
+      </View>
     </TouchableOpacity>
   );
   
   const renderServiceItem = ({ item }: { item: ServiceWithProducts }) => {
     const { service, products } = item;
     
-    // Determine service category based on the service name
-    const serviceCategory = service.name.toLowerCase().includes('wash') || 
-                           service.name.toLowerCase().includes('laundry') 
-      ? 'LAUNDRY'
-      : service.name.toLowerCase().includes('dry') || service.name.toLowerCase().includes('clean')
-      ? 'DRY_CLEANING'
-      : service.name.toLowerCase().includes('alter') || service.name.toLowerCase().includes('tailor')
-      ? 'ALTERATIONS'
-      : 'DRY_CLEANING';
-    
-    // Only show services that match the selected category
-    if (serviceCategory !== selectedCategory) {
+    // Only show the selected service
+    if (service.name !== selectedService) {
       return null;
     }
     
+
+    
     return (
       <View style={styles.serviceContainer}>
-        <View style={styles.serviceHeader}>
-          <Text style={styles.serviceName}>{service.name}</Text>
+        <View style={styles.serviceHeaderContainer}>
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false}
+            style={{flex: 1}}
+          >
+            <View style={[styles.serviceHeader, { width: 'auto' }]}>
+              <Text style={styles.serviceName}>{service.name}</Text>
+            </View>
+          </ScrollView>
+          
+          <View style={styles.serviceActionButtons}>
+            <TouchableOpacity 
+              style={styles.editButton}
+              onPress={() => handleEditService(service)}
+            >
+              <Text style={styles.editButtonText}>Edit</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.deleteButton}
+              onPress={() => handleDeleteService(service.id)}
+            >
+              <Text style={styles.deleteButtonText}>Delete</Text>
+            </TouchableOpacity>
+          </View>
         </View>
         
-        <Text style={styles.serviceDescription}>{service.description}</Text>
-        <Text style={styles.servicePrice}>Base Price: ${service.basePrice.toFixed(2)}</Text>
+        <View style={styles.serviceInfoContainer}>
+          <View style={styles.serviceInfoLeft}>
+            <Text style={styles.serviceDescription}>{service.description}</Text>
+            <Text style={styles.servicePrice}>Base Price: ${service.basePrice.toFixed(2)}</Text>
+          </View>
+          
+          <View style={styles.serviceInfoRight}>
+            {/* Add Product button */}
+            <TouchableOpacity 
+              style={styles.addProductButton}
+              onPress={() => handleAddProduct(service.id)}
+            >
+              <Text style={styles.addProductButtonText}>+ Add New Product</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
         
+
         <Text style={styles.productsHeader}>Products:</Text>
-        
+      
         {products.length > 0 ? (
-          <View style={commonStyles.productsGrid}>
-            {products.map((product) => (
-              <React.Fragment key={product.id}>
-                {renderProductItem({ item: product })}
-              </React.Fragment>
+          <View style={styles.productsRow}>
+            {products.map((product, index) => (
+              <View key={product.id} style={[commonStyles.productItem, { width: (width / Math.floor(width / 180)) - 15 }]}>
+                {product.imageUrl && (
+                  <Image 
+                    source={{ uri: product.imageUrl }} 
+                    style={commonStyles.productImage} 
+                    resizeMode="cover"
+                  />
+                )}
+                <View style={commonStyles.productInfo}>
+                  <Text style={commonStyles.productName} numberOfLines={1}>{product.name}</Text>
+                  <Text style={commonStyles.productPrice}>
+                    ${typeof product.price === 'number' ? product.price.toFixed(2) : '0.00'}
+                  </Text>
+                </View>
+                
+                <View style={styles.productButtonsContainer}>
+                  <TouchableOpacity 
+                    style={styles.editButton}
+                    onPress={() => handleEditProduct(product)}
+                  >
+                    <Text style={styles.editButtonText}>Edit</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={styles.deleteButton}
+                    onPress={() => handleDeleteProduct(product.id)}
+                  >
+                    <Text style={styles.deleteButtonText}>Delete</Text>
+                  </TouchableOpacity>
+                </View>
+
+              </View>
             ))}
           </View>
         ) : (
@@ -354,24 +568,32 @@ export default function ProductManagement({ route }: ProductManagementProps) {
     <View style={styles.container}>
       <Text style={styles.title}>Product Management</Text>
       
-      {/* Service category tabs */}
+      {/* Add New Service button */}
+      <TouchableOpacity 
+        style={styles.addServiceButton}
+        onPress={handleAddNewService}
+      >
+        <Text style={styles.addServiceButtonText}>+ Add New Service</Text>
+      </TouchableOpacity>
+      
+      {/* Service tabs */}
       <View style={styles.categoryTabs}>
-        {serviceCategories.map((category) => (
+        {serviceNames.map((serviceName) => (
           <TouchableOpacity
-            key={category}
+            key={serviceName}
             style={[
               styles.categoryTab,
-              selectedCategory === category && styles.selectedCategoryTab
+              selectedService === serviceName && styles.selectedCategoryTab
             ]}
-            onPress={() => setSelectedCategory(category)}
+            onPress={() => setSelectedService(serviceName)}
           >
             <Text 
               style={[
                 styles.categoryTabText,
-                selectedCategory === category && styles.selectedCategoryTabText
+                selectedService === serviceName && styles.selectedCategoryTabText
               ]}
             >
-              {category.replace('_', ' ')}
+              {serviceName}
             </Text>
           </TouchableOpacity>
         ))}
@@ -433,6 +655,64 @@ export default function ProductManagement({ route }: ProductManagementProps) {
         </View>
       </Modal>
       
+      {/* Service Modal (Add/Edit) */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={serviceModalVisible}
+        onRequestClose={() => setServiceModalVisible(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>{serviceModalMode === 'add' ? 'Add New Service' : 'Edit Service'}</Text>
+            
+            <Text style={styles.inputLabel}>Service Name:</Text>
+            <TextInput
+              style={styles.input}
+              value={newServiceName}
+              onChangeText={setNewServiceName}
+              placeholder="Enter service name"
+            />
+            
+            <Text style={styles.inputLabel}>Description:</Text>
+            <TextInput
+              style={[styles.input, styles.textArea]}
+              value={newServiceDescription}
+              onChangeText={setNewServiceDescription}
+              placeholder="Enter service description"
+              multiline
+            />
+            
+            <Text style={styles.inputLabel}>Base Price ($):</Text>
+            <TextInput
+              style={styles.input}
+              value={newServiceBasePrice}
+              onChangeText={setNewServiceBasePrice}
+              placeholder="0.00"
+              keyboardType="decimal-pad"
+            />
+            
+            {/* Category selection removed - will be handled in service header section */}
+            
+            <View style={styles.modalButtonsRow}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.cancelButton]}
+                onPress={() => setServiceModalVisible(false)}
+              >
+                <Text style={styles.modalButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={[styles.modalButton, styles.saveButton]}
+                onPress={handleSaveService}
+              >
+                <Text style={styles.modalButtonText}>{serviceModalMode === 'add' ? 'Create Service' : 'Update Service'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+      
       {/* Edit Product Modal */}
       <Modal
         animationType="slide"
@@ -442,7 +722,7 @@ export default function ProductManagement({ route }: ProductManagementProps) {
       >
         <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Edit Product</Text>
+            <Text style={styles.modalTitle}>{selectedProduct?.id ? 'Edit Product' : 'Add New Product'}</Text>
             
             <Text style={styles.inputLabel}>Name:</Text>
             <TextInput

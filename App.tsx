@@ -14,7 +14,7 @@ import { v4 as uuidv4 } from 'uuid'
 // Import all screens directly from src directory
 import BusinessCreate from "./src/BusinessCreate"
 import Dashboard from "./src/Dashboard"
-import ServiceManagement from "./src/ServiceManagement"
+// ServiceManagement removed - functionality now in ProductManagement
 import ProductManagement from "./src/ProductManagement"
 import CustomerSelection from "./src/CustomerSelection"
 import ProductSelectionScreen from "./src/ProductSelectionScreen"
@@ -198,29 +198,14 @@ function AppContent() {
   const [businessData, setBusinessData] = useState<{ id: string; name: string } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [showBusinessModal, setShowBusinessModal] = useState(false);
-  const [authComplete, setAuthComplete] = useState(false);
   
-  // Effect to wait for authentication to complete before checking business
+  // Effect to check for business data when component mounts
   useEffect(() => {
-    logger.log('Auth status changed:', authStatus, user?.username);
-    
-    // Skip if not fully authenticated
-    if (authStatus !== 'authenticated' || !user) {
-      setIsLoading(false);
-      setAuthComplete(false);
-      return;
-    }
-    
-    // Mark authentication as complete
-    setAuthComplete(true);
-    
-    // Give auth time to fully propagate before checking business
-    const timer = setTimeout(() => {
+    // We're already authenticated at this point (checked in AppWithAuth)
+    if (user) {
       checkForBusiness();
-    }, 500); // Short delay to ensure auth is ready
-    
-    return () => clearTimeout(timer);
-  }, [authStatus, user]);
+    }
+  }, [user]);
   
   // Separate function to check for business
   const checkForBusiness = async () => {
@@ -417,20 +402,10 @@ function AppContent() {
   };
   
   // SIMPLIFIED MODAL VISIBILITY: Only show modal when loading is complete, user is authenticated, and showBusinessModal is true
-  // Also ensure that authentication is fully complete before showing modal
-  const shouldShowModal = showBusinessModal && !isLoading && authStatus === 'authenticated' && !!user && authComplete;
+  const shouldShowModal = showBusinessModal && !isLoading && !!user;
   
-  // Show loading state or no access message while not authenticated
-  if (authStatus !== 'authenticated' && !isLoading) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <Text>Please sign in to access the app</Text>
-      </View>
-    );
-  }
-  
-  // Show loading indicator while authentication is being processed
-  if (isLoading || !authComplete) {
+  // Show loading indicator
+  if (isLoading) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
         <Text>Loading...</Text>
@@ -475,11 +450,7 @@ function AppContent() {
               businessName: businessData?.name 
             }}
           />
-        <Stack.Screen 
-          name="ServiceManagement" 
-          component={ServiceManagement} 
-          options={{ title: "Service Management" }}
-        />
+        {/* ServiceManagement screen removed - functionality now in ProductManagement */}
         <Stack.Screen 
           name="ProductManagement" 
           component={ProductManagement} 
@@ -571,15 +542,25 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <Authenticator.Provider>
-        <Authenticator
-          // Ensure the Authenticator is shown first before any app content
-          // This fixes the issue of going straight to business creation
-          signUpAttributes={['email']}
-        >
-          <AppContent />
-        </Authenticator>
+        <AppWithAuth />
       </Authenticator.Provider>
     </SafeAreaProvider>
   )
+}
+
+function AppWithAuth() {
+  const { user, authStatus } = useAuthenticator();
+  
+  // If not authenticated, show the login screen
+  if (authStatus !== 'authenticated') {
+    return (
+      <Authenticator
+        signUpAttributes={['email']}
+      />
+    );
+  }
+  
+  // If authenticated, show the app content
+  return <AppContent />;
 }
 

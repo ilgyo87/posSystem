@@ -51,6 +51,7 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   
   const [order, setOrder] = useState<Schema['Transaction']['type'] | null>(null);
+  const [customer, setCustomer] = useState<Schema['Customer']['type'] | null>(null);
   const [orderItems, setOrderItems] = useState<Schema['TransactionItem']['type'][]>([]);
   const [garments, setGarments] = useState<Schema['Garment']['type'][]>([]);
   const [loading, setLoading] = useState(true);
@@ -69,11 +70,9 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
   const [qrQuantities, setQrQuantities] = useState<{[key: string]: string}>({});
   const [adjustQuantities, setAdjustQuantities] = useState<{[key: string]: string}>({});
   const [adjustmentType, setAdjustmentType] = useState<'add' | 'subtract'>('add');
-  const [showDescriptionModal, setShowDescriptionModal] = useState(false);
-  const [currentBarcode, setCurrentBarcode] = useState('');
-  const [description, setDescription] = useState('');
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [qrCodesToPrint, setQrCodesToPrint] = useState<{qrCode: string, description: string}[]>([]);
+  const [removedGarments, setRemovedGarments] = useState<string[]>([]);
   
   // Reference to the barcode input field for auto-focusing
   const barcodeInputRef = useRef<TextInput>(null);
@@ -266,6 +265,18 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
       }
       
       setOrder(orderResult.data);
+      
+      // Fetch customer information if customerID exists
+      if (orderResult.data.customerID) {
+        try {
+          const customerResult = await client.models.Customer.get({ id: orderResult.data.customerID });
+          if (customerResult.data) {
+            setCustomer(customerResult.data);
+          }
+        } catch (error) {
+          console.error('Error fetching customer details:', error);
+        }
+      }
       
       // Fetch order items
       const orderItemsResult = await client.models.TransactionItem.list({
@@ -527,10 +538,10 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
                     {
                       text: 'Use Anyway',
                       onPress: () => {
-                        // Show description modal for the scanned item
-                        setCurrentBarcode(barcodeInput);
-                        setShowDescriptionModal(true);
+                        // Create a new garment for this order
+                        setBarcodeInput('');
                         setSelectedItem(orderItems[0]);
+                        Alert.alert('Item Added', 'The item has been added to this order.');
                       }
                     }
                   ]
@@ -544,10 +555,52 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
           // Continue with normal flow if there's an error checking
         }
         
-        // Show description modal for the scanned item
-        setCurrentBarcode(barcodeInput);
-        setShowDescriptionModal(true);
-        setSelectedItem(orderItems[0]);
+        // Automatically create garment without showing description modal
+        try {
+          const garmentResult = await client.models.Garment.create({
+            transactionItemID: orderItems[0].id,
+            qrCode: barcodeInput.trim(),
+            description: 'Garment ' + barcodeInput.trim(), // Auto-generate a basic description
+            status: 'IN_PROGRESS',
+            lastScanned: new Date().toISOString(),
+            type: 'CLOTHING'
+          });
+
+          if (garmentResult.errors || !garmentResult.data) {
+            throw new Error('Failed to create garment');
+          }
+
+          const newGarment = garmentResult.data;
+          setGarments(prevGarments => [...prevGarments, newGarment]);
+          
+          const newScannedCount = scannedCount + 1;
+          setScannedCount(newScannedCount);
+          
+          setBarcodeInput('');
+          // Focus back on input field
+          barcodeInputRef.current?.focus();
+          
+          // Check if all items are scanned - update order status and navigate
+          if (newScannedCount >= totalGarments && totalGarments > 0 && order) {
+            try {
+              // Update order status to PROCESSING and add note about status change
+              await client.models.Transaction.update({
+                id: order.id,
+                status: 'PROCESSING',
+                customerNotes: `${order.customerNotes || ''}\n[${new Date().toLocaleString()}] Status changed: PENDING → PROCESSING`
+              });
+              
+              // Skip notification and navigate directly to OrderManagement
+              navigation.navigate('OrderManagement', { businessId });
+            } catch (err) {
+              console.error('Error updating order status:', err);
+              Alert.alert('Error', 'Failed to update order status to PROCESSING');
+            }
+          }
+        } catch (error) {
+          console.error('Error creating garment:', error);
+          Alert.alert('Error', 'Failed to create garment');
+        }
         
       } catch (error) {
         console.error('Error processing barcode:', error);
@@ -556,58 +609,7 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
     }
   };
 
-  const handleSaveDescription = async () => {
-    if (!currentBarcode.trim() || !description.trim() || !selectedItem) return;
-
-    try {
-      const garmentResult = await client.models.Garment.create({
-        transactionItemID: selectedItem.id,
-        qrCode: currentBarcode,
-        description: description,
-        status: 'IN_PROGRESS',
-        lastScanned: new Date().toISOString(),
-        type: 'CLOTHING' // Add required type field
-      });
-
-      if (garmentResult.errors || !garmentResult.data) {
-        throw new Error('Failed to create garment');
-      }
-
-      const newGarment = garmentResult.data;
-      setGarments(prevGarments => [...prevGarments, newGarment]);
-      
-      const newScannedCount = scannedCount + 1;
-      setScannedCount(newScannedCount);
-      
-      setShowDescriptionModal(false);
-      setDescription('');
-      setCurrentBarcode('');
-      setBarcodeInput('');
-      // Focus back on input field
-      barcodeInputRef.current?.focus();
-      
-      // Check if all items are scanned - update order status and navigate
-      if (newScannedCount >= totalGarments && totalGarments > 0 && order) {
-        try {
-          // Update order status to PROCESSING and add note about status change
-          await client.models.Transaction.update({
-            id: order.id,
-            status: 'PROCESSING',
-            customerNotes: `${order.customerNotes || ''}\n[${new Date().toLocaleString()}] Status changed: PENDING → PROCESSING`
-          });
-          
-          // Skip notification and navigate directly to OrderManagement
-          navigation.navigate('OrderManagement', { businessId });
-        } catch (err) {
-          console.error('Error updating order status:', err);
-          Alert.alert('Error', 'Failed to update order status to PROCESSING');
-        }
-      }
-    } catch (error) {
-      console.error('Error saving garment:', error);
-      Alert.alert('Error', 'Failed to save garment');
-    }
-  };
+  // Description modal and handleSaveDescription function removed
 
   const handleAdjustQuantity = async (item: Schema['TransactionItem']['type'], quantity: number) => {
     try {
@@ -950,35 +952,47 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
         
         <View style={styles.serviceControls}>
           <View style={styles.controlGroup}>
-            <Text style={styles.controlLabel}>Print:</Text>
+            <Text style={styles.controlLabel}>Print: <Text style={styles.controlPreview}>({totalQuantity})</Text></Text>
             <View style={styles.counterRow}>
               <TouchableOpacity 
                 style={styles.counterButton}
-                onPress={() => setQrQuantities(prev => ({
-                  ...prev,
-                  [serviceName]: Math.max(0, parseInt(prev[serviceName] || '0') - 1).toString()
-                }))}
+                onPress={() => setQrQuantities(prev => {
+                  const currentValue = prev[serviceName] !== undefined ? parseInt(prev[serviceName]) : totalQuantity;
+                  return {
+                    ...prev,
+                    [serviceName]: Math.max(0, currentValue - 1).toString()
+                  };
+                })}
               >
                 <Text style={styles.counterButtonText}>-</Text>
               </TouchableOpacity>
-              <Text style={styles.counterValue}>{qrQuantities[serviceName] || '0'}</Text>
+              <Text style={styles.counterValue}>{qrQuantities[serviceName] !== undefined ? qrQuantities[serviceName] : totalQuantity.toString()}</Text>
               <TouchableOpacity 
                 style={styles.counterButton}
-                onPress={() => setQrQuantities(prev => ({
-                  ...prev,
-                  [serviceName]: (parseInt(prev[serviceName] || '0') + 1).toString()
-                }))}
+                onPress={() => setQrQuantities(prev => {
+                  const currentValue = prev[serviceName] !== undefined ? parseInt(prev[serviceName]) : totalQuantity;
+                  return {
+                    ...prev,
+                    [serviceName]: (currentValue + 1).toString()
+                  };
+                })}
               >
                 <Text style={styles.counterButtonText}>+</Text>
               </TouchableOpacity>
               <TouchableOpacity 
-                style={[styles.actionButton, !qrQuantities[serviceName] && styles.buttonDisabled]}
+                style={styles.actionButton}
                 onPress={() => {
                   // Use the first item in the service group as the selected item
                   setSelectedItem(serviceItems[0]);
+                  // If no custom quantity is set, use the total quantity
+                  if (qrQuantities[serviceName] === undefined) {
+                    setQrQuantities(prev => ({
+                      ...prev,
+                      [serviceName]: totalQuantity.toString()
+                    }));
+                  }
                   handleGenerateQR();
                 }}
-                disabled={!qrQuantities[serviceName]}
               >
                 <Text style={styles.actionButtonText}>Print</Text>
               </TouchableOpacity>
@@ -986,40 +1000,40 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
           </View>
           
           <View style={styles.controlGroup}>
-            <Text style={styles.controlLabel}>Adjust:</Text>
+            <Text style={styles.controlLabel}>Adjust: <Text style={styles.controlPreview}>({totalQuantity})</Text></Text>
             <View style={styles.counterRow}>
               <TouchableOpacity 
                 style={styles.counterButton}
                 onPress={() => {
-                  const currentQuantity = parseInt(adjustQuantities[serviceName] || '0');
-                  if (currentQuantity > 0) {
+                  const currentValue = adjustQuantities[serviceName] !== undefined ? parseInt(adjustQuantities[serviceName]) : totalQuantity;
+                  if (currentValue > 0) {
                     setAdjustQuantities(prev => ({
                       ...prev,
-                      [serviceName]: (currentQuantity - 1).toString()
+                      [serviceName]: (currentValue - 1).toString()
                     }));
                   }
                 }}
               >
                 <Text style={styles.counterButtonText}>-</Text>
               </TouchableOpacity>
-              <Text style={styles.counterValue}>{adjustQuantities[serviceName] || '0'}</Text>
+              <Text style={styles.counterValue}>{adjustQuantities[serviceName] !== undefined ? adjustQuantities[serviceName] : totalQuantity.toString()}</Text>
               <TouchableOpacity 
                 style={styles.counterButton}
                 onPress={() => {
-                  const currentQuantity = parseInt(adjustQuantities[serviceName] || '0');
+                  const currentValue = adjustQuantities[serviceName] !== undefined ? parseInt(adjustQuantities[serviceName]) : totalQuantity;
                   setAdjustQuantities(prev => ({
                     ...prev,
-                    [serviceName]: (currentQuantity + 1).toString()
+                    [serviceName]: (currentValue + 1).toString()
                   }));
                 }}
               >
                 <Text style={styles.counterButtonText}>+</Text>
               </TouchableOpacity>
               <TouchableOpacity 
-                style={[styles.actionButton, adjustQuantities[serviceName] === totalQuantity.toString() && styles.buttonDisabled]}
+                style={[styles.actionButton, (adjustQuantities[serviceName] === undefined || parseInt(adjustQuantities[serviceName]) === totalQuantity) && styles.buttonDisabled]}
                 onPress={() => {
                   // Apply the adjustment to all items in this service group
-                  const newTotalQuantity = parseInt(adjustQuantities[serviceName]);
+                  const newTotalQuantity = adjustQuantities[serviceName] !== undefined ? parseInt(adjustQuantities[serviceName]) : totalQuantity;
                   if (newTotalQuantity >= 0 && newTotalQuantity !== totalQuantity) {
                     // Distribute the new quantity proportionally across all items in the service
                     const ratio = newTotalQuantity / totalQuantity;
@@ -1029,7 +1043,7 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
                     });
                   }
                 }}
-                disabled={adjustQuantities[serviceName] === totalQuantity.toString()}
+                disabled={adjustQuantities[serviceName] === undefined || parseInt(adjustQuantities[serviceName]) === totalQuantity}
               >
                 <Text style={styles.actionButtonText}>Apply</Text>
               </TouchableOpacity>
@@ -1044,53 +1058,87 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
     );
   };
 
-  const renderScannedItem = ({ item }: { item: Schema['Garment']['type'] }) => (
-    <View style={styles.scannedItem}>
-      <View style={styles.scannedItemContent}>
-        <View style={styles.scannedItemInfo}>
-          <Text style={styles.scannedItemDescription}>{item.description}</Text>
-          {item.lastScanned && (
-            <Text style={styles.scannedItemTime}>
-              Scanned: {new Date(item.lastScanned).toLocaleString()}
-            </Text>
-          )}
-          <TouchableOpacity 
-            style={styles.editDescriptionButton}
-            onPress={() => {
-              setEditingGarment(item);
-              setEditDescription(item.description || '');
-              setShowEditModal(true);
-            }}
-          >
-            <Text style={styles.editDescriptionButtonText}>Edit Description</Text>
-          </TouchableOpacity>
-        </View>
-        <View style={styles.imageActions}>
-          {item.imageUrl ? (
-            <>
-              <Image 
-                source={{ uri: item.imageUrl }} 
-                style={styles.garmentImage} 
-              />
+  const renderOrderItem = ({ item }: { item: Schema['Garment']['type'] }) => {
+    // Check if the item has been scanned (status is IN_PROGRESS)
+    const isScanned = item.status === 'IN_PROGRESS';
+    // Check if the item has been removed
+    const isRemoved = removedGarments.includes(item.id);
+    
+    // Don't render removed items
+    if (isRemoved) return null;
+    
+    return (
+      <View style={[styles.orderItem, isScanned && styles.scannedOrderItem]}>
+        <View style={styles.orderItemContent}>
+          <View style={styles.orderItemInfo}>
+            <View style={styles.orderItemHeader}>
+              <Text style={styles.orderItemDescription}>{item.description}</Text>
               <TouchableOpacity 
-                style={styles.deleteImageButton}
-                onPress={() => handleDeleteImage(item)}
+                style={styles.removeItemButton}
+                onPress={() => {
+                  // Add to removed garments list
+                  setRemovedGarments(prev => [...prev, item.id]);
+                }}
               >
-                <Text style={styles.deleteImageButtonText}>Delete Image</Text>
+                <Text style={styles.removeItemButtonText}>X</Text>
               </TouchableOpacity>
-            </>
-          ) : (
-            <TouchableOpacity 
-              style={styles.uploadButton}
-              onPress={() => handleImageUpload(item)}
-            >
-              <Text style={styles.uploadButtonText}>Add Photo</Text>
-            </TouchableOpacity>
-          )}
+            </View>
+            
+            {item.lastScanned && (
+              <Text style={styles.orderItemTime}>
+                {isScanned ? 'Scanned' : 'Created'}: {new Date(item.lastScanned).toLocaleString()}
+              </Text>
+            )}
+            
+            <View style={styles.qrCodeContainer}>
+              <QRCode
+                value={item.qrCode}
+                size={80}
+                backgroundColor="white"
+                color="black"
+              />
+              <Text style={styles.qrCodeText}>{item.qrCode}</Text>
+            </View>
+            
+            <View style={styles.itemActionButtons}>
+              <TouchableOpacity 
+                style={styles.editDescriptionButton}
+                onPress={() => {
+                  setEditingGarment(item);
+                  setEditDescription(item.description || '');
+                  setShowEditModal(true);
+                }}
+              >
+                <Text style={styles.editDescriptionButtonText}>Edit Description</Text>
+              </TouchableOpacity>
+              
+              {item.imageUrl ? (
+                <>
+                  <Image 
+                    source={{ uri: item.imageUrl }} 
+                    style={styles.garmentImage} 
+                  />
+                  <TouchableOpacity 
+                    style={styles.deleteImageButton}
+                    onPress={() => handleDeleteImage(item)}
+                  >
+                    <Text style={styles.deleteImageButtonText}>Delete Image</Text>
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <TouchableOpacity 
+                  style={styles.uploadButton}
+                  onPress={() => handleImageUpload(item)}
+                >
+                  <Text style={styles.uploadButtonText}>Add Photo</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
         </View>
       </View>
-    </View>
-  );
+    );
+  };
 
   if (loading) {
     return (
@@ -1118,16 +1166,38 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Order Details</Text>
-        <TouchableOpacity 
-          style={styles.dashboardButton}
-          onPress={() => navigation.reset({
-            index: 0,
-            routes: [{ name: 'Dashboard', params: { businessId } }],
-          })}
-        >
-          <Text style={styles.dashboardButtonText}>Dashboard</Text>
-        </TouchableOpacity>
+        <View style={styles.headerLeft}>
+          <Text style={styles.title}>Order Details</Text>
+          {order && (
+            <View style={styles.orderInfo}>
+              <Text style={styles.orderInfoText}>Order #{order.orderNumber || order.id.substring(0, 8)}</Text>
+              <Text style={styles.orderInfoText}>{customer ? `${customer.firstName} ${customer.lastName}` : ''}</Text>
+              <Text style={styles.orderInfoText}>{scannedCount}/{totalGarments} items</Text>
+            </View>
+          )}
+        </View>
+        <View style={styles.headerRight}>
+          {order?.status === 'CLEANED' && (
+            <TouchableOpacity 
+              style={styles.rackButtonHeader}
+              onPress={() => navigation.navigate('RackAssignment', {
+                orderId: orderId,
+                businessId: businessId
+              })}
+            >
+              <Text style={styles.rackButtonText}>Assign to Rack</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity 
+            style={styles.dashboardButton}
+            onPress={() => navigation.reset({
+              index: 0,
+              routes: [{ name: 'Dashboard', params: { businessId } }],
+            })}
+          >
+            <Text style={styles.dashboardButtonText}>Dashboard</Text>
+          </TouchableOpacity>
+        </View>
       </View>
       
       {processingMode ? (
@@ -1187,28 +1257,17 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
             </TouchableOpacity>
           </View>
           
-          {/* Order Summary Section */}
-          {order && (
-            <View style={styles.summarySection}>
-              <Text style={styles.orderNumber}>Order #{order.id.substring(0, 8)}</Text>
-              <Text style={styles.customerName}>Customer: {order.customerID || 'N/A'}</Text>
-              <Text style={styles.garmentCount}>
-                Garments: {scannedCount} / {totalGarments}
-              </Text>
-              
-              {/* Rack Assignment Button for CLEANED orders */}
-              {order.status === 'CLEANED' && (
-                <TouchableOpacity 
-                  style={styles.rackButton}
-                  onPress={() => navigation.navigate('RackAssignment', {
-                    orderId: orderId,
-                    businessId: businessId
-                  })}
-                >
-                  <Text style={styles.rackButtonText}>Assign to Rack</Text>
-                </TouchableOpacity>
-              )}
-            </View>
+          {/* Rack Assignment Button for CLEANED orders */}
+          {order?.status === 'CLEANED' && (
+            <TouchableOpacity 
+              style={styles.rackButton}
+              onPress={() => navigation.navigate('RackAssignment', {
+                orderId: orderId,
+                businessId: businessId
+              })}
+            >
+              <Text style={styles.rackButtonText}>Assign to Rack</Text>
+            </TouchableOpacity>
           )}
 
           {/* Order Notes Section */}
@@ -1225,27 +1284,38 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
           <View style={styles.mainContent}>
             {/* Order Items Section */}
             <View style={styles.orderItemsSection}>
-              <Text style={styles.sectionTitle}>Order Items</Text>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Order Items</Text>
+                <TouchableOpacity 
+                  style={styles.printAllButton}
+                  onPress={() => {
+                    // Get all non-removed garments
+                    const garmentsToPrint = garments.filter(g => !removedGarments.includes(g.id));
+                    if (garmentsToPrint.length === 0) {
+                      Alert.alert('No Items', 'There are no items to print');
+                      return;
+                    }
+                    
+                    // Format for printing
+                    const qrCodes = garmentsToPrint.map(g => ({
+                      qrCode: g.qrCode,
+                      description: g.description || 'No description'
+                    }));
+                    
+                    setQrCodesToPrint(qrCodes);
+                    setShowPrintModal(true);
+                  }}
+                >
+                  <Text style={styles.printAllButtonText}>Print All</Text>
+                </TouchableOpacity>
+              </View>
               <FlatList
-                data={Object.entries(serviceCategories)}
-                renderItem={renderServiceItem}
-                keyExtractor={([serviceName]) => serviceName}
-                style={styles.itemsList}
-                numColumns={2}
-                columnWrapperStyle={styles.columnWrapper}
-              />
-            </View>
-
-            {/* Scanned Items Section */}
-            <View style={styles.scannedSection}>
-              <Text style={styles.sectionTitle}>Scanned Items</Text>
-              <FlatList
-                data={garments.filter(g => g.status === 'IN_PROGRESS')}
-                renderItem={renderScannedItem}
+                data={garments}
+                renderItem={renderOrderItem}
                 keyExtractor={item => item.id}
-                style={styles.scannedList}
+                style={styles.orderItemsList}
                 ListEmptyComponent={
-                  <Text style={styles.emptyText}>No items scanned yet</Text>
+                  <Text style={styles.emptyText}>No order items yet</Text>
                 }
               />
             </View>
@@ -1253,47 +1323,7 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
         </>
       )}
 
-      {/* Description Modal */}
-      <Modal
-        visible={showDescriptionModal}
-        animationType="slide"
-        transparent={true}
-      >
-        <View style={styles.modalContainer}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Enter Item Description</Text>
-            
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Enter garment description"
-              value={description}
-              onChangeText={setDescription}
-              multiline
-            />
-            
-            <View style={styles.modalButtons}>
-              <TouchableOpacity 
-                style={[styles.modalButton, styles.cancelButton]}
-                onPress={() => {
-                  setShowDescriptionModal(false);
-                  setDescription('');
-                  setCurrentBarcode('');
-                }}
-              >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={[styles.modalButton, styles.confirmButton]}
-                onPress={handleSaveDescription}
-                disabled={!description.trim()}
-              >
-                <Text style={styles.cancelButtonText}>Save</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      {/* Description Modal removed */}
 
       {/* QR Scanner Modal */}
       <Modal
@@ -1307,10 +1337,82 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
               onScan={(qrCode) => {
                 setBarcodeInput(qrCode);
                 setShowScanModal(false);
-                handleBarcodeSubmit();
+                
+                // Check if this is an existing QR code that was previously removed
+                const existingGarment = garments.find(g => g.qrCode === qrCode);
+                if (existingGarment && removedGarments.includes(existingGarment.id)) {
+                  // Remove from the removed list to add it back
+                  setRemovedGarments(prev => prev.filter(id => id !== existingGarment.id));
+                  
+                  // If it's not already scanned, mark it as scanned
+                  if (existingGarment.status !== 'IN_PROGRESS') {
+                    handleBarcodeSubmit();
+                  } else {
+                    Alert.alert('Success', 'Item added back to the order list');
+                  }
+                } else {
+                  // Process as normal
+                  handleBarcodeSubmit();
+                }
               }}
               onClose={() => setShowScanModal(false)}
             />
+          </View>
+        </View>
+      </Modal>
+      
+      {/* Print Modal */}
+      <Modal
+        visible={showPrintModal}
+        animationType="slide"
+        transparent={true}
+      >
+        <View style={styles.modalContainer}>
+          <View style={[styles.modalContent, styles.printModalContent]}>
+            <Text style={styles.modalTitle}>QR Codes Ready to Print ({qrCodesToPrint.length})</Text>
+            
+            <FlatList
+              data={qrCodesToPrint}
+              keyExtractor={(_, index) => `qr-code-${index}`}
+              renderItem={({ item }) => (
+                <View style={styles.qrPreviewItem}>
+                  <View style={styles.qrCodeWrapper}>
+                    <QRCode
+                      value={item.qrCode}
+                      size={120}
+                      backgroundColor="white"
+                      color="black"
+                    />
+                  </View>
+                  <Text style={styles.qrDescription}>{item.description}</Text>
+                  <Text style={styles.qrCodeText}>{item.qrCode}</Text>
+                </View>
+              )}
+              style={styles.qrPreviewContainer}
+              contentContainerStyle={{ padding: 16 }}
+              ListEmptyComponent={<Text style={styles.emptyText}>No QR codes to display</Text>}
+            />
+            
+            <View style={styles.modalButtonRow}>
+              <TouchableOpacity 
+                style={[styles.printModalButton, styles.cancelButton]}
+                onPress={() => setShowPrintModal(false)}
+              >
+                <Text style={styles.modalButtonText}>Close</Text>
+              </TouchableOpacity>
+          
+              <TouchableOpacity 
+                style={[styles.printModalButton, styles.printButton]}
+                disabled={qrCodesToPrint.length === 0}
+                onPress={async () => {
+                  // Printing logic would go here
+                  Alert.alert('Print', `Printing ${qrCodesToPrint.length} QR codes`);
+                  setShowPrintModal(false);
+                }}
+              >
+                <Text style={styles.modalButtonText}>Print ({qrCodesToPrint.length})</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -1318,7 +1420,7 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = StyleSheet.create<any>({
   container: {
     flex: 1,
     backgroundColor: '#f8f9fa',
@@ -1341,6 +1443,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 16,
     backgroundColor: '#fff',
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   title: {
     fontSize: 18,
@@ -1409,11 +1521,30 @@ const styles = StyleSheet.create({
     flexDirection: 'column',
   },
   orderItemsSection: {
-    backgroundColor: '#fff',
-  },
-  scannedSection: {
     flex: 1,
-    backgroundColor: '#fff',
+    padding: 16,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+    margin: 16,
+  },
+  orderItemsList: {
+    flex: 1,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  printAllButton: {
+    backgroundColor: '#2196F3',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 4,
+  },
+  printAllButtonText: {
+    color: '#fff',
+    fontWeight: '500',
   },
   sectionTitle: {
     fontSize: 16,
@@ -1448,6 +1579,8 @@ const styles = StyleSheet.create({
   },
   itemsList: {
     backgroundColor: '#fff',
+    paddingHorizontal: 8,
+    flexGrow: 0,
   },
   scannedList: {
     backgroundColor: '#fff',
@@ -1567,14 +1700,72 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontWeight: '500',
   },
-  scannedItem: {
+  orderItem: {
     backgroundColor: '#fff',
+    borderRadius: 8,
     padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    marginBottom: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  scannedOrderItem: {
+    backgroundColor: '#e8f5e9', // Light green background for scanned items
+    borderColor: '#4caf50',
+    borderWidth: 1,
+  },
+  orderItemContent: {
+    flexDirection: 'column',
+  },
+  orderItemInfo: {
+    flex: 1,
+  },
+  orderItemHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: 8,
+  },
+  orderItemDescription: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#333',
+    flex: 1,
+  },
+  orderItemTime: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 8,
+  },
+  removeItemButton: {
+    backgroundColor: '#f44336',
+    borderRadius: 12,
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  removeItemButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  qrCodeContainer: {
+    alignItems: 'center',
+    marginVertical: 8,
+  },
+  qrCodeText: {
+    fontSize: 10,
+    color: '#666',
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  itemActionButtons: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 8,
   },
   scannedInfo: {
     flex: 1,
@@ -1650,14 +1841,15 @@ const styles = StyleSheet.create({
   serviceCard: {
     backgroundColor: '#fff',
     borderRadius: 8,
-    padding: 16,
-    marginBottom: 16,
+    padding: 12,
     elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     flex: 1,
+    minWidth: 200,
+    maxWidth: 300,
     margin: 8,
   },
   serviceHeader: {
@@ -1700,6 +1892,11 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#666',
     marginBottom: 4,
+  },
+  controlPreview: {
+    fontSize: 14,
+    fontWeight: 'normal',
+    color: '#666',
   },
   counterRow: {
     flexDirection: 'row',
@@ -1762,6 +1959,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
   },
+  orderInfo: {
+    flexDirection: 'row',
+    marginLeft: 16,
+    gap: 12,
+  },
+  orderInfoText: {
+    fontSize: 14,
+    color: '#555',
+    fontWeight: '500',
+  },
   scannedItemContent: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1782,6 +1989,42 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     width: '80%',
     maxHeight: '80%',
+  },
+  printModalContent: {
+    maxHeight: '80%',
+  },
+  qrPreviewContainer: {
+    maxHeight: 400,
+  },
+  qrPreviewItem: {
+    alignItems: 'center',
+    marginBottom: 16,
+    padding: 8,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+  },
+  qrCodeWrapper: {
+    padding: 8,
+    backgroundColor: '#fff',
+    borderRadius: 4,
+    marginBottom: 8,
+  },
+  qrDescription: {
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  modalButtonRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 16,
+  },
+  printModalButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 4,
+    minWidth: 100,
+    alignItems: 'center',
   },
   modalTitle: {
     fontSize: 18,
@@ -1821,16 +2064,16 @@ const styles = StyleSheet.create({
     marginTop: 16,
     alignItems: 'center',
   },
+  rackButtonHeader: {
+    backgroundColor: '#2196F3',
+    padding: 8,
+    borderRadius: 4,
+    marginRight: 8,
+  },
   rackButtonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '500',
     textAlign: 'center',
-  },
-  orderInfo: {
-    backgroundColor: '#fff',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eaeaea',
   },
 });

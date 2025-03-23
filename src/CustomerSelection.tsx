@@ -487,7 +487,8 @@ export default function CustomerSelection({ route, navigation }: CustomerSelecti
           <TouchableOpacity 
             style={styles.scanButton}
             onPress={() => navigation.navigate('BarcodeScanner', {
-              onScan: handleQrCodeScanned
+              onScan: handleQrCodeScanned,
+              scanType: 'customer'
             })}
           >
             <Text style={styles.scanButtonText}>Scan QR</Text>

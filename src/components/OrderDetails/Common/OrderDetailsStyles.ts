@@ -70,6 +70,11 @@ const styles = StyleSheet.create({
   orderInfo: {
     marginBottom: 16,
   },
+  customerName: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
   infoRow: {
     flexDirection: 'row',
     marginBottom: 4,
@@ -116,16 +121,24 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginBottom: 8,
   },
+  servicesContainer: {
+    flexDirection: 'row',
+    flexWrap: 'nowrap',
+    marginBottom: 16,
+    paddingHorizontal: 4,
+  },
   serviceCard: {
     backgroundColor: 'white',
     borderRadius: 8,
-    padding: 16,
-    marginBottom: 16,
+    padding: 10,
+    margin: 4,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.2,
     shadowRadius: 2,
     elevation: 2,
+    flex: 1,
+    minWidth: 120,
   },
   serviceHeader: {
     flexDirection: 'row',
@@ -150,8 +163,15 @@ const styles = StyleSheet.create({
   serviceControls: {
     marginTop: 8,
   },
+  serviceControlsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+  },
   controlGroup: {
     marginBottom: 12,
+    flex: 1,
+    paddingRight: 8,
   },
   controlLabel: {
     fontSize: 14,
@@ -282,6 +302,23 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 2,
     elevation: 2,
+    flex: 1,
+  },
+  scannedItemsContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: '60%',
+    backgroundColor: '#f9f9f9',
+    borderTopWidth: 1,
+    borderTopColor: '#ddd',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 5,
+    zIndex: 10,
   },
   scannedItemRow: {
     flexDirection: 'row',

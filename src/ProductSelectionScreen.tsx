@@ -13,6 +13,7 @@ import {
   Modal,
   useWindowDimensions
 } from 'react-native';
+import Svg, { Path } from 'react-native-svg';
 import { Calendar } from 'react-native-calendars';
 // Default data now handled in Dashboard
 import { commonStyles } from './styles/common.styles';
@@ -45,9 +46,11 @@ export default function ProductSelectionScreen({ route, navigation }: ProductSel
   
   const [loading, setLoading] = useState(true);
   const [services, setServices] = useState<ServiceWithProducts[]>([]);
+  const [selectedServiceIndex, setSelectedServiceIndex] = useState(0);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Schema['Product']['type'] | null>(null);
+  const [currentProductPage, setCurrentProductPage] = useState(0); // Track current page of products
   const [calendarVisible, setCalendarVisible] = useState(false);
   const [customerPreferences, setCustomerPreferences] = useState<string>('');
   const [notesModalVisible, setNotesModalVisible] = useState(false);
@@ -64,6 +67,11 @@ export default function ProductSelectionScreen({ route, navigation }: ProductSel
   };
   
   const [pickupDate, setPickupDate] = useState<Date>(getDefaultPickupDate());
+  
+  // Reset product page when changing services
+  useEffect(() => {
+    setCurrentProductPage(0);
+  }, [selectedServiceIndex]);
   
   // Format date for display
   const formatDate = (date: Date) => {
@@ -84,7 +92,7 @@ export default function ProductSelectionScreen({ route, navigation }: ProductSel
     
     fetchServicesAndProducts();
   }, [businessId]);
-  
+
   const fetchServicesAndProducts = async () => {
     setLoading(true);
     try {
@@ -137,16 +145,14 @@ export default function ProductSelectionScreen({ route, navigation }: ProductSel
       setLoading(false);
     }
   };
-  
-  // Default services creation has been moved to Dashboard component
-  
+
   const handleViewProductDetails = (product: Schema['Product']['type']) => {
-    setSelectedProduct(product);
-    setDetailModalVisible(true);
+    // Add to cart directly instead of showing details
+    addToCart(product, 'product', product.serviceID);
   };
   
   const addToCart = (item: Schema['Service']['type'] | Schema['Product']['type'], type: 'service' | 'product', serviceId?: string) => {
-    // Check if item is already in cart
+    // Check if item already exists in cart
     const existingItemIndex = cart.findIndex(
       cartItem => cartItem.id === item.id && cartItem.type === type
     );
@@ -225,8 +231,41 @@ export default function ProductSelectionScreen({ route, navigation }: ProductSel
     });
   };
   
-  const renderServiceItem = ({ item }: { item: ServiceWithProducts }) => {
-    const { service, products } = item;
+  const renderServiceTabs = () => {
+    return (
+      <ScrollView 
+        horizontal 
+        showsHorizontalScrollIndicator={false} 
+        style={styles.tabsContainer}
+        contentContainerStyle={styles.tabsContent}
+      >
+        {services.map((serviceItem, index) => (
+          <TouchableOpacity
+            key={serviceItem.service.id}
+            style={[
+              styles.tabItem,
+              selectedServiceIndex === index && styles.tabItemActive
+            ]}
+            onPress={() => setSelectedServiceIndex(index)}
+          >
+            <Text 
+              style={[
+                styles.tabText,
+                selectedServiceIndex === index && styles.tabTextActive
+              ]}
+            >
+              {serviceItem.service.name}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+    );
+  };
+
+  const renderSelectedServiceContent = () => {
+    if (services.length === 0) return null;
+    
+    const { service, products } = services[selectedServiceIndex];
     
     return (
       <View style={styles.serviceContainer}>
@@ -248,36 +287,81 @@ export default function ProductSelectionScreen({ route, navigation }: ProductSel
         <Text style={styles.productsHeader}>Products:</Text>
         
         {products.length > 0 ? (
-          <View style={commonStyles.productsGrid}>
-            {products.map((product) => (
-              <TouchableOpacity 
-                key={product.id}
-                style={[commonStyles.productItem, { width: (width / Math.floor(width / 180)) - 15 }]}
-                onPress={() => handleViewProductDetails(product)}
-              >
-                {product.imageUrl && (
-                  <Image 
-                    source={{ uri: product.imageUrl }} 
-                    style={commonStyles.productImage} 
-                    resizeMode="cover"
-                  />
-                )}
-                <View style={commonStyles.productInfo}>
-                  <Text style={commonStyles.productName} numberOfLines={1}>{product.name}</Text>
-                  <Text style={commonStyles.productPrice}>${product.price.toFixed(2)}</Text>
-                </View>
+          <>
+            <View style={styles.fixedProductsGrid}>
+              <View style={styles.productRow}>
+                {products.slice(currentProductPage * 8, currentProductPage * 8 + 4).map((product) => (
+                  <TouchableOpacity 
+                    key={product.id}
+                    style={[commonStyles.productItem, styles.fixedProductItem]}
+                    onPress={() => {
+                      addToCart(product, 'product', product.serviceID);
+                    }}
+                  >
+                    {product.imageUrl && (
+                      <Image 
+                        source={{ uri: product.imageUrl }} 
+                        style={commonStyles.productImage} 
+                        resizeMode="cover"
+                      />
+                    )}
+                    <View style={commonStyles.productInfo}>
+                      <Text style={commonStyles.productName} numberOfLines={1}>{product.name}</Text>
+                      <Text style={styles.largePrice}>${product.price.toFixed(2)}</Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <View style={styles.productRow}>
+                {products.slice(currentProductPage * 8 + 4, currentProductPage * 8 + 8).map((product) => (
+                  <TouchableOpacity 
+                    key={product.id}
+                    style={[commonStyles.productItem, styles.fixedProductItem]}
+                    onPress={() => {
+                      addToCart(product, 'product', product.serviceID);
+                    }}
+                  >
+                    {product.imageUrl && (
+                      <Image 
+                        source={{ uri: product.imageUrl }} 
+                        style={commonStyles.productImage} 
+                        resizeMode="cover"
+                      />
+                    )}
+                    <View style={commonStyles.productInfo}>
+                      <Text style={commonStyles.productName} numberOfLines={1}>{product.name}</Text>
+                      <Text style={styles.largePrice}>${product.price.toFixed(2)}</Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+            
+            {/* Pagination Navigation */}
+            {products.length > 8 && (
+              <View style={styles.paginationContainer}>
                 <TouchableOpacity 
-                  style={styles.addButton}
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    addToCart(product, 'product', product.serviceID);
-                  }}
+                  style={[styles.paginationArrow, currentProductPage === 0 && styles.paginationArrowDisabled]}
+                  onPress={() => setCurrentProductPage(prev => Math.max(0, prev - 1))}
+                  disabled={currentProductPage === 0}
                 >
-                  <Text style={styles.addButtonText}>+ Add</Text>
+                  <Text style={[styles.paginationArrowText, currentProductPage === 0 && styles.paginationArrowTextDisabled]}>←</Text>
                 </TouchableOpacity>
-              </TouchableOpacity>
-            ))}
-          </View>
+                
+                <Text style={styles.paginationText}>
+                  {currentProductPage + 1} / {Math.ceil(products.length / 8)}
+                </Text>
+                
+                <TouchableOpacity 
+                  style={[styles.paginationArrow, currentProductPage >= Math.ceil(products.length / 8) - 1 && styles.paginationArrowDisabled]}
+                  onPress={() => setCurrentProductPage(prev => Math.min(Math.ceil(products.length / 8) - 1, prev + 1))}
+                  disabled={currentProductPage >= Math.ceil(products.length / 8) - 1}
+                >
+                  <Text style={[styles.paginationArrowText, currentProductPage >= Math.ceil(products.length / 8) - 1 && styles.paginationArrowTextDisabled]}>→</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </>
         ) : (
           <Text style={styles.noProducts}>No products available</Text>
         )}
@@ -289,7 +373,12 @@ export default function ProductSelectionScreen({ route, navigation }: ProductSel
             style={styles.dateSelector}
             onPress={() => setCalendarVisible(true)}
           >
-            <Text style={styles.dateText}>{formatDate(pickupDate)}</Text>
+            <View style={styles.dateTextContainer}>
+              <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#333" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <Path d="M19 4H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V10h14v10zm0-12H5V6h14v2zm-7 5h-5v5h5v-5z" />
+              </Svg>
+              <Text style={styles.dateText}>{formatDate(pickupDate)}</Text>
+            </View>
           </TouchableOpacity>
           <Text style={styles.pickupInstructions}>Tap to change pickup date</Text>
         </View>
@@ -339,7 +428,7 @@ export default function ProductSelectionScreen({ route, navigation }: ProductSel
       </TouchableOpacity>
     </View>
   );
-  
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -378,13 +467,16 @@ export default function ProductSelectionScreen({ route, navigation }: ProductSel
       <View style={styles.content}>
         {/* Left side - Services and Products */}
         <View style={styles.servicesContainer}>
-          {/* Services list */}
-          <FlatList
-            data={services}
-            keyExtractor={(item) => item.service.id}
-            renderItem={renderServiceItem}
-            contentContainerStyle={styles.servicesList}
-          />
+          {/* Services tabs */}
+          {renderServiceTabs()}
+          
+          {/* Selected service content */}
+          <ScrollView 
+            style={[styles.serviceContentContainer, { height: height * 0.8 }]} 
+            showsVerticalScrollIndicator={true}
+          >
+            {renderSelectedServiceContent()}
+          </ScrollView>
         </View>
         
         {/* Right side - Cart */}
@@ -484,7 +576,11 @@ export default function ProductSelectionScreen({ route, navigation }: ProductSel
             
             <Calendar
               onDayPress={(day: {year: number; month: number; day: number; timestamp: number; dateString: string}) => {
-                const selectedDate = new Date(day.timestamp);
+                // Directly construct the date from year, month, day components to avoid timezone issues
+                // Note: JavaScript months are 0-indexed, so we subtract 1 from the month
+                const selectedDate = new Date(day.year, day.month - 1, day.day, 12, 0, 0, 0);
+                
+                // Update the pickup date
                 setPickupDate(selectedDate);
                 setCalendarVisible(false);
               }}
@@ -584,6 +680,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#ddd',
   },
+  dateTextContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
   dateText: {
     fontSize: 16,
     color: '#333',
@@ -677,46 +779,127 @@ const styles = StyleSheet.create({
     borderRightWidth: 1,
     borderRightColor: '#e1e1e1',
   },
+  tabsContainer: {
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e1e1e1',
+    elevation: 1,
+  },
+  tabsContent: {
+    flexDirection: 'row',
+    flexGrow: 1,
+  },
+  tabItem: {
+    flex: 1,
+    paddingVertical: 15,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
+  tabItemActive: {
+    borderBottomColor: '#2196F3',
+  },
+  tabText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#666',
+    textAlign: 'center',
+  },
+  tabTextActive: {
+    color: '#2196F3',
+    fontWeight: 'bold',
+  },
+  serviceContentContainer: {
+    backgroundColor: '#fff',
+  },
   servicesList: {
+    flex: 1,
     padding: 15,
   },
   serviceContainer: {
+    flex: 1,
     backgroundColor: '#fff',
-    borderRadius: 8,
-    padding: 15,
-    marginBottom: 15,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+    paddingHorizontal: 15,
+    paddingTop: 8,
+    paddingBottom: 15,
+  },
+  fixedProductsGrid: {
+    width: '100%',
+  },
+  productRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-evenly',
+    marginBottom: 10,
+  },
+  fixedProductItem: {
+    width: '22%',
+    margin: 0,
+  },
+  largePrice: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#2c3e50',
+    marginTop: 5,
+  },
+  paginationContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 15,
+    marginBottom: 10,
+  },
+  paginationArrow: {
+    backgroundColor: '#4CAF50',
+    borderRadius: 20,
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginHorizontal: 10,
+  },
+  paginationArrowDisabled: {
+    backgroundColor: '#cccccc',
+  },
+  paginationArrowText: {
+    color: 'white',
+    fontSize: 22,
+    fontWeight: 'bold',
+  },
+  paginationArrowTextDisabled: {
+    color: '#999999',
+  },
+  paginationText: {
+    fontSize: 16,
+    color: '#333',
+    marginHorizontal: 10,
   },
   serviceHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 4,
   },
   serviceName: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: 'bold',
     color: '#333',
   },
   serviceDescription: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#666',
-    marginBottom: 8,
+    marginBottom: 4,
   },
   servicePrice: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '500',
     color: '#333',
-    marginBottom: 15,
+    marginBottom: 8,
   },
   productsHeader: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: 'bold',
-    marginBottom: 10,
+    marginBottom: 8,
     color: '#555',
   },
   productItem: {

@@ -15,6 +15,7 @@ const schema = a.schema({
     customers: a.hasMany("Customer", "businessID"),
     products: a.hasMany("Product", "businessID"),
     transactions: a.hasMany("Transaction", "businessID"),
+    counters: a.hasMany("Counter", "businessID"),
     employeeBusinessLinks: a.hasMany("EmployeeBusinessLink", "businessID"),
     garmentBusinessLinks: a.hasMany("GarmentBusinessLink", "businessID")
   })
@@ -201,6 +202,7 @@ const schema = a.schema({
       id: a.id().required(),
       businessID: a.id().required(),
       customerID: a.id().required(),
+      orderNumber: a.integer(),
       status: a.string().required(),
       total: a.float().required(),
       paymentMethod: a.string().required(),
@@ -227,6 +229,16 @@ const schema = a.schema({
       productID: a.id(),
       transaction: a.belongsTo("Transaction", "transactionID"),
       garments: a.hasMany("Garment", "transactionItemID")
+    })
+    .authorization((allow) => allow.owner()),
+    
+  Counter: a
+    .model({
+      id: a.id().required(),
+      name: a.string().required(),
+      value: a.integer().required(),
+      businessID: a.id().required(),
+      business: a.belongsTo("Business", "businessID")
     })
     .authorization((allow) => allow.owner()),
 

@@ -14,7 +14,7 @@ const SAMPLE_BARCODES = [
 ];
 
 export default function BarcodeScanner({ route, navigation }: BarcodeScannerProps) {
-  const { onScan } = route.params;
+  const { onScan, scanType = 'customer' } = route.params;
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [scanned, setScanned] = useState(false);
   const [showMockScanner, setShowMockScanner] = useState(false);
@@ -50,6 +50,21 @@ export default function BarcodeScanner({ route, navigation }: BarcodeScannerProp
       }
       navigation.goBack();
     }, 500);
+  };
+
+  // Generate simulated QR data based on scan type
+  const generateSimulatedQRData = () => {
+    const randomCode = Math.floor(100000 + Math.random() * 900000);
+    switch (scanType) {
+      case 'customer':
+        return `CUSTOMER-${randomCode}`;
+      case 'garment':
+        return `GARMENT-${randomCode}`;
+      case 'order':
+        return `ORDER-${randomCode}`;
+      default:
+        return `QR-${randomCode}`;
+    }
   };
 
   const handleBarCodeScanned = ({ type, data }: { type: string; data: string }) => {
@@ -89,7 +104,7 @@ export default function BarcodeScanner({ route, navigation }: BarcodeScannerProp
         <View style={styles.header}>
           <Text style={styles.headerText}>Barcode Scanner</Text>
           <Text style={styles.subHeaderText}>
-            Enter a barcode manually or select a sample
+            {scanType.charAt(0).toUpperCase() + scanType.slice(1)} QR Code Scanner
           </Text>
         </View>
 
@@ -110,18 +125,15 @@ export default function BarcodeScanner({ route, navigation }: BarcodeScannerProp
             </TouchableOpacity>
           </View>
 
-          <Text style={styles.sampleTitle}>Sample Barcodes:</Text>
+          <Text style={styles.sampleTitle}>Generate Sample {scanType.charAt(0).toUpperCase() + scanType.slice(1)} QR Code:</Text>
           
-          {SAMPLE_BARCODES.map((item, index) => (
-            <TouchableOpacity 
-              key={index}
-              style={styles.barcodeItem}
-              onPress={() => handleScan(item.code)}
-            >
-              <Text style={styles.barcodeCode}>{item.code}</Text>
-              <Text style={styles.barcodeDescription}>{item.description}</Text>
-            </TouchableOpacity>
-          ))}
+          <TouchableOpacity 
+            style={styles.barcodeItem}
+            onPress={() => handleScan(generateSimulatedQRData())}
+          >
+            <Text style={styles.barcodeCode}>Generate Random {scanType.charAt(0).toUpperCase() + scanType.slice(1)} Code</Text>
+            <Text style={styles.barcodeDescription}>Click to generate a sample QR code</Text>
+          </TouchableOpacity>
         </ScrollView>
 
         <View style={styles.footer}>
@@ -159,6 +171,7 @@ export default function BarcodeScanner({ route, navigation }: BarcodeScannerProp
       <Camera
         style={styles.camera}
         onBarCodeScanned={scanned ? undefined : handleBarCodeScanned}
+        type="back"
         ratio="16:9"
       >
         <View style={styles.overlay}>
@@ -180,6 +193,19 @@ export default function BarcodeScanner({ route, navigation }: BarcodeScannerProp
           <View style={styles.controlsContainer}>
             <TouchableOpacity style={styles.cancelButtonCamera} onPress={handleCancel}>
               <Text style={styles.cancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.captureButton}
+              onPress={() => {
+                if (!scanned) {
+                  // Generate a simulated QR code when capture button is pressed
+                  handleScan(generateSimulatedQRData());
+                }
+              }}
+              disabled={scanned}
+            >
+              <View style={styles.captureButtonInner} />
             </TouchableOpacity>
             
             <TouchableOpacity style={styles.manualEntryButton} onPress={handleShowMockScanner}>
@@ -392,5 +418,19 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     minWidth: 120,
     alignItems: 'center',
+  },
+  captureButton: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  captureButtonInner: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: 'white',
   },
 });

@@ -24,13 +24,19 @@ export const productManagementStyles = StyleSheet.create({
     borderBottomColor: '#e1e1e1',
   },
   categoryTabs: {
-    flexDirection: 'row',
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#e1e1e1',
+    flexDirection: 'row',
+    width: '100%',
+  },
+  categoryTabsContent: {
+    flexDirection: 'row',
+    flexGrow: 1,
   },
   categoryTab: {
-    padding: 15,
+    paddingVertical: 15,
+    paddingHorizontal: 15,
     flex: 1,
     alignItems: 'center',
   },
@@ -41,6 +47,7 @@ export const productManagementStyles = StyleSheet.create({
   categoryTabText: {
     fontSize: 16,
     color: '#666',
+    textAlign: 'center',
   },
   selectedCategoryTabText: {
     color: '#2196F3',
@@ -48,6 +55,54 @@ export const productManagementStyles = StyleSheet.create({
   },
   servicesList: {
     padding: 15,
+  },
+  productsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-start',
+    marginTop: 10,
+  },
+  productButtonsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 5,
+  },
+  deleteButton: {
+    backgroundColor: '#F44336',
+    borderRadius: 4,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    marginTop: 5,
+  },
+  deleteButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  addServiceButton: {
+    backgroundColor: '#4CAF50',
+    borderRadius: 4,
+    paddingVertical: 10,
+    paddingHorizontal: 15,
+    alignSelf: 'flex-start',
+    margin: 15,
+  },
+  addServiceButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  addProductButton: {
+    backgroundColor: '#2196F3',
+    borderRadius: 4,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    alignSelf: 'flex-end',
+  },
+  addProductButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
   serviceContainer: {
     backgroundColor: '#fff',
@@ -60,11 +115,43 @@ export const productManagementStyles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 2,
   },
+  serviceHeaderContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  serviceActionButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+  },
+  serviceInfoContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 10,
+    marginBottom: 15,
+  },
+  serviceInfoLeft: {
+    flex: 1,
+    paddingRight: 10,
+  },
+  serviceInfoRight: {
+    justifyContent: 'center',
+    alignItems: 'flex-end',
+  },
+  serviceHeaderScroll: {
+    width: '100%',
+  },
   serviceHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 6,
   },
   serviceName: {
     fontSize: 18,
@@ -140,18 +227,19 @@ export const productManagementStyles = StyleSheet.create({
     marginTop: 10,
   },
   editButton: {
-    backgroundColor: '#2196F3',
+    backgroundColor: '#4CAF50',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 4,
     marginTop: 5,
-    alignSelf: 'center',
+    marginRight: 5,
   },
   editButtonText: {
     color: 'white',
     fontWeight: 'bold',
     fontSize: 12,
   },
+
   modalContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -210,5 +298,37 @@ export const productManagementStyles = StyleSheet.create({
   modalButtonText: {
     color: 'white',
     fontWeight: 'bold',
+  },
+  textArea: {
+    height: 80,
+    textAlignVertical: 'top',
+  },
+  categorySelection: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginBottom: 20,
+  },
+  categoryOption: {
+    backgroundColor: '#f0f0f0',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 4,
+    margin: 4,
+  },
+  selectedCategoryOption: {
+    backgroundColor: '#2196F3',
+  },
+  categoryOptionText: {
+    fontSize: 14,
+    color: '#333',
+  },
+  selectedCategoryOptionText: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  modalButtonsRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 15,
   },
 });

@@ -248,7 +248,6 @@ export default function Dashboard({ route, navigation }: DashboardScreenProps) {
   };
 
   const menuItems = [
-    { title: 'Service Management', screen: 'ServiceManagement', icon: '🧹' },
     { title: 'Product Management', screen: 'ProductManagement', icon: '📦' },
     { title: 'Employee Management', screen: 'EmployeeManagement', icon: '👥' },
     { title: 'Appointments', screen: 'Appointments', icon: '📅' },
@@ -269,9 +268,6 @@ export default function Dashboard({ route, navigation }: DashboardScreenProps) {
     try {
       // Handle specific screens with their proper types
       switch (screenName) {
-        case 'ServiceManagement':
-          nav.navigate('ServiceManagement', { businessId });
-          break;
         case 'ProductManagement':
           nav.navigate('ProductManagement', { businessId });
           break;

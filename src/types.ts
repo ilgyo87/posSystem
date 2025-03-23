@@ -29,7 +29,7 @@ export type RootStackParamList = {
     pickupDate: string; 
     customerPreferences?: string;
   };
-  ServiceManagement: { businessId: string };
+  // ServiceManagement removed - functionality now in ProductManagement
   ProductManagement: { businessId: string };
   EmployeeManagement: { businessId: string };
   Appointments: { businessId: string };
@@ -39,6 +39,6 @@ export type RootStackParamList = {
   DataExport: { businessId: string };
   Settings: { businessId: string };
   BusinessCreate: undefined;
-  BarcodeScanner: { onScan: (code: string) => void };
+  BarcodeScanner: { onScan: (code: string) => void; scanType?: 'customer' | 'garment' | 'order' };
   ProductSelection: { businessId: string; customerId: string; customerName: string };
 };
