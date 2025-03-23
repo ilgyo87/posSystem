@@ -131,13 +131,27 @@ export default function ProductSelectionScreen({ route, navigation }: ProductSel
           continue;
         }
         
+        // Sort products by createdAt date (oldest first)
+        const sortedProducts = [...(productsResult.data ?? [])].sort((a, b) => {
+          const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return dateA - dateB; // Ascending order (oldest first)
+        });
+        
         servicesWithProducts.push({
           service,
-          products: productsResult.data ?? []
+          products: sortedProducts
         });
       }
       
-      setServices(servicesWithProducts);
+      // Sort services by createdAt date (oldest first) to match ProductManagement screen
+      const sortedServices = [...servicesWithProducts].sort((a, b) => {
+        const dateA = a.service.createdAt ? new Date(a.service.createdAt).getTime() : 0;
+        const dateB = b.service.createdAt ? new Date(b.service.createdAt).getTime() : 0;
+        return dateA - dateB; // Ascending order (oldest first)
+      });
+      
+      setServices(sortedServices);
     } catch (error) {
       console.error('Error fetching services and products:', error);
       Alert.alert('Error', 'Failed to fetch services and products');
@@ -270,7 +284,7 @@ export default function ProductSelectionScreen({ route, navigation }: ProductSel
     return (
       <View style={styles.serviceContainer}>
         <View style={styles.serviceHeader}>
-          <Text style={styles.serviceName}>{service.name}</Text>
+              <Text style={styles.serviceName}>{service.name}</Text>
           <TouchableOpacity 
             style={styles.addButton}
             onPress={() => addToCart(service, 'service')}
@@ -279,10 +293,10 @@ export default function ProductSelectionScreen({ route, navigation }: ProductSel
           </TouchableOpacity>
         </View>
         
-        {service.description && (
-          <Text style={styles.serviceDescription}>{service.description}</Text>
-        )}
-        <Text style={styles.servicePrice}>Base Price: ${service.basePrice.toFixed(2)}</Text>
+            {service.description && (
+              <Text style={styles.serviceDescription}>{service.description}</Text>
+            )}
+            <Text style={styles.servicePrice}>Base Price: ${service.basePrice.toFixed(2)}</Text>
         
         <Text style={styles.productsHeader}>Products:</Text>
         
@@ -298,15 +312,15 @@ export default function ProductSelectionScreen({ route, navigation }: ProductSel
                       addToCart(product, 'product', product.serviceID);
                     }}
                   >
-                    {product.imageUrl && (
-                      <Image 
-                        source={{ uri: product.imageUrl }} 
-                        style={commonStyles.productImage} 
-                        resizeMode="cover"
-                      />
-                    )}
-                    <View style={commonStyles.productInfo}>
-                      <Text style={commonStyles.productName} numberOfLines={1}>{product.name}</Text>
+                {product.imageUrl && (
+                  <Image 
+                    source={{ uri: product.imageUrl }} 
+                    style={commonStyles.productImage} 
+                    resizeMode="cover"
+                  />
+                )}
+                <View style={commonStyles.productInfo}>
+                  <Text style={commonStyles.productName} numberOfLines={1}>{product.name}</Text>
                       <Text style={styles.largePrice}>${product.price.toFixed(2)}</Text>
                     </View>
                   </TouchableOpacity>
@@ -335,8 +349,8 @@ export default function ProductSelectionScreen({ route, navigation }: ProductSel
                   </TouchableOpacity>
                 ))}
               </View>
-            </View>
-            
+                </View>
+                
             {/* Pagination Navigation */}
             {products.length > 8 && (
               <View style={styles.paginationContainer}>

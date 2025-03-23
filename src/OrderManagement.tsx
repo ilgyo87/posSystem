@@ -8,7 +8,9 @@ import {
   ActivityIndicator,
   Alert,
   TextInput,
-  Modal
+  Modal,
+  NativeSyntheticEvent,
+  TextInputKeyPressEventData
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -43,6 +45,7 @@ export default function OrderManagement({ route }: OrderManagementScreenProps) {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
+  const [selectedOrderIndex, setSelectedOrderIndex] = useState(0);
   const [selectedOrder, setSelectedOrder] = useState<Schema['Transaction']['type'] | null>(null);
   const [showQRModal, setShowQRModal] = useState(false);
   const [showScanModal, setShowScanModal] = useState(false);
@@ -78,9 +81,31 @@ export default function OrderManagement({ route }: OrderManagementScreenProps) {
         console.error('Error fetching orders:', ordersResult.errors);
         Alert.alert('Error', 'Failed to fetch orders');
       } else {
-        // Log to debug status values
-        console.log('Order statuses:', sortedOrders.map(order => order.status));
-        setOrders(sortedOrders);
+        // For each order, fetch customer details
+        const ordersWithCustomerInfo = await Promise.all(sortedOrders.map(async (order) => {
+          try {
+            if (order.customerID) {
+              const customerResult = await client.models.Customer.get({
+                id: order.customerID
+              });
+              
+              if (customerResult.data) {
+                // Add customer info to the order object
+                return {
+                  ...order,
+                  customerFirstName: customerResult.data.firstName,
+                  customerLastName: customerResult.data.lastName
+                };
+              }
+            }
+            return order;
+          } catch (err) {
+            console.error('Error fetching customer for order:', err);
+            return order;
+          }
+        }));
+        
+        setOrders(ordersWithCustomerInfo);
       }
     } catch (error) {
       console.error('Error fetching orders:', error);
@@ -204,7 +229,8 @@ export default function OrderManagement({ route }: OrderManagementScreenProps) {
         transactionItemID: selectedItem.id,
         qrCode: `${selectedItem.id}-${Date.now()}`,
         description: garmentDescription,
-        status: 'PENDING'
+        status: 'PENDING',
+        type: 'STANDARD' // Adding required type field
       });
 
       if (garmentResult.errors || !garmentResult.data) {
@@ -231,9 +257,10 @@ export default function OrderManagement({ route }: OrderManagementScreenProps) {
     return orders.filter(order => {
       const matchesSearch = 
         searchQuery === '' || 
-        // Use ID instead of orderNumber since it doesn't exist in the model
+        // Search by order ID or customer name
         order.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (order.customerID && order.customerID.toLowerCase().includes(searchQuery.toLowerCase()));
+        (order as any).customerFirstName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (order as any).customerLastName?.toLowerCase().includes(searchQuery.toLowerCase());
         
       // Make the status comparison case-insensitive
       const orderStatus = order.status || '';
@@ -278,6 +305,18 @@ export default function OrderManagement({ route }: OrderManagementScreenProps) {
     setFilterStatus(status);
     console.log(`Filtering by status: ${status}`);
   }
+  
+  const handleSubmitEditing = () => {
+    const filteredOrders = getFilteredOrders();
+    // If there's exactly one order in the filtered results, navigate to it
+    if (filteredOrders.length === 1) {
+      handleViewOrderDetails(filteredOrders[0]);
+    } 
+    // If there are multiple results, navigate to the first one
+    else if (filteredOrders.length > 1) {
+      handleViewOrderDetails(filteredOrders[0]);
+    }
+  }
 
   const renderOrderItem = ({ item }: { item: Schema['Transaction']['type'] }) => {
     const status = item.status ? item.status.toUpperCase() : 'PENDING';
@@ -289,7 +328,7 @@ export default function OrderManagement({ route }: OrderManagementScreenProps) {
         onPress={() => handleViewOrderDetails(item)}
       >
         <View style={styles.orderHeader}>
-          <Text style={styles.orderNumber}>#{item.id.substring(0, 8)}</Text>
+          <Text style={styles.orderNumber}>Order ID: {item.id}</Text>
           <Text style={[
             styles.orderStatus,
             { 
@@ -307,7 +346,9 @@ export default function OrderManagement({ route }: OrderManagementScreenProps) {
         
         <View style={styles.orderDetails}>
           <Text style={styles.orderCustomer}>
-            Customer ID: {item.customerID || 'N/A'}
+            {(item as any).customerFirstName && (item as any).customerLastName 
+              ? `${(item as any).customerFirstName} ${(item as any).customerLastName}` 
+              : `Customer ID: ${item.customerID || 'N/A'}`}
           </Text>
           <Text style={styles.orderDate}>
             {item.createdAt ? formatDate(item.createdAt) : 'N/A'}
@@ -338,6 +379,8 @@ export default function OrderManagement({ route }: OrderManagementScreenProps) {
           placeholder="Search by order number or ID"
           value={searchQuery}
           onChangeText={setSearchQuery}
+          onSubmitEditing={handleSubmitEditing}
+          returnKeyType="go"
         />
       </View>
       

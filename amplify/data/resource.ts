@@ -15,7 +15,6 @@ const schema = a.schema({
     customers: a.hasMany("Customer", "businessID"),
     products: a.hasMany("Product", "businessID"),
     transactions: a.hasMany("Transaction", "businessID"),
-    counters: a.hasMany("Counter", "businessID"),
     employeeBusinessLinks: a.hasMany("EmployeeBusinessLink", "businessID"),
     garmentBusinessLinks: a.hasMany("GarmentBusinessLink", "businessID")
   })
@@ -65,43 +64,7 @@ const schema = a.schema({
     })
     .authorization((allow) => allow.owner()),
 
-  Order: a
-    .model({
-      id: a.id().required(),
-      businessID: a.id().required(),
-      customerID: a.id().required(),
-      employeeID: a.id().required(),
-      appointmentID: a.id(), // Optional, as not all orders need appointments
-      orderNumber: a.string().required(),
-      dropOffDate: a.datetime().required(),
-      promisedDate: a.datetime().required(),
-      completedDate: a.datetime(),
-      status: a.string().required(), // RECEIVED, IN_PROGRESS, READY, COMPLETED, CANCELLED
-      total: a.float().required(),
-      paymentStatus: a.string().required(), // PENDING, PAID, REFUNDED
-      paymentMethod: a.string(), // CASH, CARD, etc.
-      notes: a.string(),
-      items: a.hasMany("OrderItem", "orderID"),
-      business: a.belongsTo("Business", "businessID"),
-      customer: a.belongsTo("Customer", "customerID"),
-      employee: a.belongsTo("Employee", "employeeID"),
-      appointment: a.belongsTo("Appointment", "appointmentID")
-    })
-    .authorization((allow) => allow.owner()),
-
-  OrderItem: a
-    .model({
-      id: a.id().required(),
-      orderID: a.id().required(),
-      serviceID: a.id().required(),
-      quantity: a.integer().required(),
-      price: a.float().required(),
-      notes: a.string(),
-      status: a.string().required(), // PENDING, IN_PROGRESS, COMPLETED
-      order: a.belongsTo("Order", "orderID"),
-      service: a.belongsTo("Service", "serviceID")
-    })
-    .authorization((allow) => allow.owner()),
+  // Order and OrderItem models have been removed as they were redundant with Transaction/TransactionItem
 
   Garment: a
     .model({
@@ -199,10 +162,10 @@ const schema = a.schema({
     
   Transaction: a
     .model({
-      id: a.id().required(),
+      id: a.id().required(), // Primary identifier used as the Order ID throughout the application
       businessID: a.id().required(),
       customerID: a.id().required(),
-      orderNumber: a.integer(),
+      orderNumber: a.integer(), // Optional legacy field, not used in current implementation
       status: a.string().required(),
       total: a.float().required(),
       paymentMethod: a.string().required(),
@@ -232,15 +195,6 @@ const schema = a.schema({
     })
     .authorization((allow) => allow.owner()),
     
-  Counter: a
-    .model({
-      id: a.id().required(),
-      name: a.string().required(),
-      value: a.integer().required(),
-      businessID: a.id().required(),
-      business: a.belongsTo("Business", "businessID")
-    })
-    .authorization((allow) => allow.owner()),
 
   EmployeeBusinessLink: a
     .model({

@@ -49,9 +49,6 @@ export default function CheckoutScreen({ route, navigation }: CheckoutScreenProp
   
   // Receipt options
   const [printReceipt, setPrintReceipt] = useState(true);
-  const [emailReceipt, setEmailReceipt] = useState(true);
-  const [customerEmail, setCustomerEmail] = useState('');
-  const [customerPhone, setCustomerPhone] = useState('');
   
   // Payment options
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'other'>('card');
@@ -75,59 +72,17 @@ export default function CheckoutScreen({ route, navigation }: CheckoutScreenProp
     }
     
     setLoading(true);
-    
-    try {
-      // Get or create the order counter for this business
-      let orderNumber = 1; // Default start at 1
-      
-      // Try to find an existing counter
-      const counterResponse = await client.models.Counter.list({
-        filter: {
-          and: [
-            { businessID: { eq: businessId } },
-            { name: { eq: 'orderCounter' } }
-          ]
-        }
-      });
-      
-      let counter;
-      
-      if (counterResponse.data && counterResponse.data.length > 0) {
-        // Counter exists, increment it
-        counter = counterResponse.data[0];
-        orderNumber = counter.value + 1;
-        
-        // Update the counter
-        await client.models.Counter.update({
-          id: counter.id,
-          value: orderNumber
-        });
-      } else {
-        // Create a new counter starting at 1
-        const newCounterResponse = await client.models.Counter.create({
-          name: 'orderCounter',
-          value: 1,
-          businessID: businessId
-        });
-        
-        if (!newCounterResponse.data) {
-          throw new Error('Failed to create counter');
-        }
-      }
-      
-      // Create transaction record with the order number
+        try {
+      // Create transaction record using the auto-generated ID as the order ID
       const transactionResponse = await client.models.Transaction.create({
         businessID: businessId,
         customerID: customerId, // Using customerId directly
-        orderNumber: orderNumber, // Set the sequential order number
         status: 'PENDING',
         total: total,
         paymentMethod: paymentMethod,
         pickupDate: pickupDate,
         customerNotes: customerPreferences || '',
-        receiptSent: emailReceipt,
-        receiptEmail: customerEmail,
-        customerPhone: customerPhone,
+        receiptSent: false,
       });
       
       // In Amplify Gen 2, the created model is returned inside a data property
@@ -150,11 +105,6 @@ export default function CheckoutScreen({ route, navigation }: CheckoutScreenProp
       }
       
       // Handle receipt options silently
-      if (emailReceipt && customerEmail) {
-        // In a real app, this would call a backend service to send an email
-        console.log(`Email receipt sent to ${customerEmail}`);
-      }
-      
       if (printReceipt) {
         // In a real app, this would trigger printing via a connected printer
         console.log('Printing receipt...');
@@ -261,12 +211,6 @@ export default function CheckoutScreen({ route, navigation }: CheckoutScreenProp
           {renderReceiptPreview()}
           
           <View style={styles.successActions}>
-            {emailReceipt && customerEmail && (
-              <Text style={styles.emailSentText}>
-                Receipt has been sent to {customerEmail}
-              </Text>
-            )}
-            
             <TouchableOpacity 
               style={styles.doneButton}
               onPress={handleCompleteCheckout}
@@ -321,33 +265,6 @@ export default function CheckoutScreen({ route, navigation }: CheckoutScreenProp
         </View>
         
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Customer Contact</Text>
-          
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Email:</Text>
-            <TextInput
-              style={styles.input}
-              value={customerEmail}
-              onChangeText={setCustomerEmail}
-              placeholder="customer@example.com"
-              keyboardType="email-address"
-              autoCapitalize="none"
-            />
-          </View>
-          
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Phone:</Text>
-            <TextInput
-              style={styles.input}
-              value={customerPhone}
-              onChangeText={setCustomerPhone}
-              placeholder="(555) 123-4567"
-              keyboardType="phone-pad"
-            />
-          </View>
-        </View>
-        
-        <View style={styles.section}>
           <Text style={styles.sectionTitle}>Receipt Options</Text>
           
           <View style={styles.optionRow}>
@@ -360,15 +277,7 @@ export default function CheckoutScreen({ route, navigation }: CheckoutScreenProp
             />
           </View>
           
-          <View style={styles.optionRow}>
-            <Text style={styles.optionLabel}>Email Receipt</Text>
-            <Switch
-              value={emailReceipt}
-              onValueChange={setEmailReceipt}
-              trackColor={{ false: '#767577', true: '#81b0ff' }}
-              thumbColor={emailReceipt ? '#2196F3' : '#f4f3f4'}
-            />
-          </View>
+
         </View>
         
         <View style={styles.section}>
@@ -550,21 +459,7 @@ const styles = StyleSheet.create({
     color: '#555',
     lineHeight: 20,
   },
-  inputGroup: {
-    marginBottom: 16,
-  },
-  inputLabel: {
-    fontSize: 16,
-    color: '#333',
-    marginBottom: 8,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 4,
-    padding: 10,
-    fontSize: 16,
-  },
+
   optionRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -776,11 +671,7 @@ const styles = StyleSheet.create({
   successActions: {
     alignItems: 'center',
   },
-  emailSentText: {
-    fontSize: 14,
-    color: '#4CAF50',
-    marginBottom: 16,
-  },
+
   doneButton: {
     backgroundColor: '#2196F3',
     padding: 16,

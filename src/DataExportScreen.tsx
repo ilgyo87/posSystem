@@ -104,8 +104,8 @@ const DataExportScreen: React.FC<DataExportScreenProps> = ({ route, navigation }
           break;
           
         case 'orders':
-          // Export all orders for this business
-          const ordersResponse = await client.models.Order.list({
+          // Export all transactions (orders) for this business
+          const ordersResponse = await client.models.Transaction.list({
             filter: {
               businessID: {
                 eq: businessId
@@ -114,15 +114,15 @@ const DataExportScreen: React.FC<DataExportScreenProps> = ({ route, navigation }
           });
           
           if (!ordersResponse.data) {
-            throw new Error('Order data not found');
+            throw new Error('Transaction data not found');
           }
           
-          // For each order, get its items
+          // For each transaction, get its items
           const orders = await Promise.all(
             ordersResponse.data.map(async (order: any) => {
-              const itemsResponse = await client.models.OrderItem.list({
+              const itemsResponse = await client.models.TransactionItem.list({
                 filter: {
-                  orderID: {
+                  transactionID: {
                     eq: order.id
                   }
                 }
@@ -220,7 +220,7 @@ const DataExportScreen: React.FC<DataExportScreenProps> = ({ route, navigation }
           );
           
           setExportProgress('Exporting orders data...');
-          const ordersData = await client.models.Order.list({
+          const ordersData = await client.models.Transaction.list({
             filter: {
               businessID: {
                 eq: businessId
@@ -231,9 +231,9 @@ const DataExportScreen: React.FC<DataExportScreenProps> = ({ route, navigation }
           setExportProgress('Exporting order items data...');
           const ordersWithItems = await Promise.all(
             (ordersData.data || []).map(async (order: any) => {
-              const itemsResponse = await client.models.OrderItem.list({
+              const itemsResponse = await client.models.TransactionItem.list({
                 filter: {
-                  orderID: {
+                  transactionID: {
                     eq: order.id
                   }
                 }
