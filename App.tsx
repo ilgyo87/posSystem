@@ -119,22 +119,18 @@ const styles = StyleSheet.create({
 // Modal styles for business creation modal
 const modalStyles = StyleSheet.create({
   modalContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
     alignItems: 'center',
-    zIndex: 1000,
   },
   modalContent: {
     backgroundColor: 'white',
     borderRadius: 10,
     padding: 20,
     width: '90%',
-    maxHeight: '90%', // Increased to allow more space for content
+    maxWidth: 400,
+    maxHeight: '80%',
     elevation: 5, // Add shadow on Android
     shadowColor: '#000', // Shadow properties for iOS
     shadowOffset: { width: 0, height: 2 },
@@ -174,8 +170,10 @@ const modalStyles = StyleSheet.create({
     fontWeight: 'bold',
   },
   modalText: {
-    marginBottom: 15,
+    marginBottom: 20,
     textAlign: 'center',
+    fontSize: 16,
+    color: '#555'
   }
 });
 
@@ -367,7 +365,7 @@ function AppContent() {
   };
 
   // Function to create a business from the modal
-  const handleBusinessCreated = (business: Schema['Business']['type']) => {
+  const handleBusinessCreated = async (business: Schema['Business']['type']) => {
     console.log('Business created:', business.id, business.name);
     
     // Set business data for the app
@@ -376,33 +374,28 @@ function AppContent() {
       name: business.name
     });
     
-    // Save business to storage
-    saveBusinessData(business.id, business.name).then(() => {
+    try {
+      // Save business to storage
+      await saveBusinessData(business.id, business.name);
       console.log('Business data saved to storage');
-    }).catch(error => {
-      console.error('Error saving business data:', error);
-    });
-    
-    // Mark as created
-    markBusinessAsCreated().then(() => {
+      
+      // Mark as created
+      await markBusinessAsCreated();
       console.log('Business marked as created');
-    }).catch(error => {
-      console.error('Error marking business as created:', error);
-    });
-    
-    // Check and initialize default services
-    checkAndInitializeServices(business.id).then(() => {
+      
+      // Check and initialize default services
+      await checkAndInitializeServices(business.id);
       console.log('Services checked/initialized');
-    }).catch(error => {
-      console.error('Error checking/initializing services:', error);
-    });
-    
-    // Hide the modal
-    setShowBusinessModal(false);
+      
+      // Hide the modal flag
+      setShowBusinessModal(false);
+      
+      // We don't need to navigate here - just update the initialRouteName
+      // by changing the showBusinessModal state to false
+    } catch (error) {
+      console.error('Error in business creation process:', error);
+    }
   };
-  
-  // SIMPLIFIED MODAL VISIBILITY: Only show modal when loading is complete, user is authenticated, and showBusinessModal is true
-  const shouldShowModal = showBusinessModal && !isLoading && !!user;
   
   // Show loading indicator
   if (isLoading) {
@@ -415,27 +408,33 @@ function AppContent() {
   
   return (
     <>
-      {/* Business Creation Modal - only show if shouldShowModal is true */}
-      {shouldShowModal && (
-        <View style={modalStyles.modalContainer}>
-          <View style={modalStyles.modalContent}>
-            <View style={modalStyles.modalHeader}>
-              <Text style={modalStyles.modalTitle}>Create Your Business</Text>
-            </View>
-            <Text style={modalStyles.modalText}>
-              Please create a business to continue using the app
-            </Text>
-            <View style={modalStyles.businessCreateContainer}>
-              <BusinessCreate 
-                onBusinessCreated={handleBusinessCreated} 
-                isLoading={isLoading}
-              />
-            </View>
-          </View>
-        </View>
-      )}
 
-      <Stack.Navigator initialRouteName={initialRoute}>
+      <Stack.Navigator initialRouteName={showBusinessModal ? 'BusinessCreate' : 'Dashboard'}>
+          <Stack.Screen 
+            name="BusinessCreate" 
+            options={{
+              title: "Create Your Business",
+              headerShown: false,
+              gestureEnabled: false
+            }}
+          >
+            {props => (
+              <View style={modalStyles.modalContainer}>
+                <View style={modalStyles.modalContent}>
+                  <View style={modalStyles.modalHeader}>
+                    <Text style={modalStyles.modalTitle}>Create Your Business</Text>
+                  </View>
+                  <Text style={modalStyles.modalText}>
+                    Please create a business to continue using the app
+                  </Text>
+                  <BusinessCreate 
+                    onBusinessCreated={handleBusinessCreated} 
+                    isLoading={isLoading}
+                  />
+                </View>
+              </View>
+            )}
+          </Stack.Screen>
           <Stack.Screen 
             name="Dashboard" 
             component={Dashboard} 

@@ -41,7 +41,7 @@ export default function BusinessCreate({ onBusinessCreated, isLoading = false }:
   const [location, setLocation] = useState("")
   const [isCreating, setIsCreating] = useState(false)
   const [nameError, setNameError] = useState("") // For business name validation errors
-  const [modalVisible, setModalVisible] = useState(true) // Modal is always visible in this component
+  // No longer need modal visibility state since we're using navigation
   
   // Create refs for input fields to enable tabbing
   const businessNameRef = React.useRef<TextInput>(null)
@@ -245,13 +245,15 @@ export default function BusinessCreate({ onBusinessCreated, isLoading = false }:
       }
       
       // Navigate to Dashboard
-      if (navigation && navigation.reset) {
-        console.log('Navigating to Dashboard');
-        navigation.reset({
-          index: 0,
-          routes: [{ name: 'Dashboard', params: { businessId: businessId, businessName: businessName } }],
-        });
-      }
+      console.log('Navigating to Dashboard');
+      // Force a more aggressive navigation reset to ensure we go to Dashboard
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Dashboard', params: { businessId: businessId, businessName: businessName } }],
+      });
+      
+      // Add a delay to ensure navigation completes
+      await new Promise(resolve => setTimeout(resolve, 100));
     } catch (error: any) {
       setIsCreating(false);
       console.error("Create business error:", error);
@@ -268,19 +270,7 @@ export default function BusinessCreate({ onBusinessCreated, isLoading = false }:
   };
 
   return (
-    <Modal
-      animationType="slide"
-      transparent={true}
-      visible={modalVisible}
-      onRequestClose={() => {
-        // This would typically close the modal, but in this case we keep it open
-        // as it's the main component
-      }}
-    >
-      <View style={styles.modalContainer}>
-        <View style={styles.modalContent}>
-          <Text style={styles.modalTitle}>Create New Business</Text>
-          
+      <View style={styles.formContainer}>
           <TextInput
             ref={businessNameRef}
             style={[styles.input, nameError ? styles.inputError : null]}
@@ -347,27 +337,16 @@ export default function BusinessCreate({ onBusinessCreated, isLoading = false }:
               <Text style={styles.saveButtonText}>{isCreating ? "Creating..." : "Create"}</Text>
             </TouchableOpacity>
           </View>
-        </View>
       </View>
-    </Modal>
   )
 }
 
 const styles = StyleSheet.create({
-  modalContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  formContainer: {
+    width: '100%',
+    padding: 10,
   },
-  modalContent: {
-    backgroundColor: 'white',
-    borderRadius: 8,
-    padding: 20,
-    width: '90%',
-    maxWidth: 500,
-  },
-  modalTitle: {
+  formTitle: {
     fontSize: 20,
     fontWeight: 'bold',
     marginBottom: 16,
