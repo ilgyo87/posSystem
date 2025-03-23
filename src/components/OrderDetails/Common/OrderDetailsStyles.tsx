@@ -90,9 +90,6 @@ export const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'column',
   },
-  orderItemsSection: {
-    backgroundColor: '#fff',
-  },
   scannedSection: {
     flex: 1,
     backgroundColor: '#fff',
@@ -103,20 +100,6 @@ export const styles = StyleSheet.create({
     color: '#333',
     padding: 16,
     backgroundColor: '#f8f9fa',
-  },
-  barcodeContainer: {
-    flexDirection: 'row',
-    padding: 16,
-    backgroundColor: '#fff',
-  },
-  input: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 4,
-    padding: 12,
-    marginRight: 8,
-    fontSize: 16,
   },
   garmentItem: {
     backgroundColor: '#fff',
@@ -405,28 +388,6 @@ export const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
   },
-  adjustControls: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  adjustCounter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  adjustButton: {
-    backgroundColor: '#2196F3',
-    padding: 8,
-    borderRadius: 4,
-    minWidth: 80,
-    marginLeft: 8,
-  },
-  adjustButtonText: {
-    color: '#fff',
-    textAlign: 'center',
-    fontSize: 14,
-    fontWeight: '500',
-  },
   errorContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -529,11 +490,18 @@ export const styles = StyleSheet.create({
     minWidth: 80,
     alignItems: 'center',
   },
+  modalButtonText: {
+    color: '#fff',
+    textAlign: 'center',
+    fontSize: 14,
+    fontWeight: '500',
+  },
   confirmButton: {
     backgroundColor: '#4CAF50',
     padding: 8,
     borderRadius: 4,
     minWidth: 80,
+    alignItems: 'center',
   },
   rackButton: {
     backgroundColor: '#2196F3',
@@ -553,6 +521,37 @@ export const styles = StyleSheet.create({
     padding: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#eaeaea',
+  },
+  orderItemsContainer: {
+    backgroundColor: '#fff',
+    marginBottom: 16,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  orderItemDetails: {
+    flex: 1,
+    padding: 12,
+  },
+  orderItemName: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#333',
+    marginBottom: 4,
+  },
+  orderItemRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  orderItemQuantity: {
+    fontSize: 14,
+    color: '#666',
+  },
+  orderItemPrice: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#2196F3',
   },
 });
 

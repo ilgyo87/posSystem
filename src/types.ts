@@ -1,5 +1,54 @@
 export type ServiceCategory = 'DRY_CLEANING' | 'LAUNDRY' | 'ALTERATIONS';
 
+// Type definitions for data models used in the application
+export type OrderData = {
+  id: string;
+  businessID: string;
+  customerID: string;
+  orderNumber?: number;
+  status: string;
+  total: number;
+  paymentMethod: string;
+  pickupDate: string;
+  customerNotes?: string;
+  receiptSent?: boolean;
+  receiptEmail?: string;
+  customerPhone?: string;
+  firstName?: string;
+  lastName?: string;
+  customerFirstName?: string;
+  customerLastName?: string;
+  createdAt: string;
+  updatedAt?: string;
+};
+
+export type TransactionItemData = {
+  id: string;
+  transactionID: string;
+  itemType: string;
+  name: string;
+  quantity: number;
+  price: number;
+  serviceID?: string;
+  productID?: string;
+};
+
+export type GarmentData = {
+  id: string;
+  qrCode: string;
+  description: string;
+  status: string;
+  notes?: string;
+  type: string;
+  brand?: string;
+  size?: string;
+  color?: string;
+  material?: string;
+  lastScanned?: Date;
+  imageUrl?: string;
+  transactionItemID: string;
+};
+
 export type RootStackParamList = {
   Login: undefined;
   SignUp: undefined;

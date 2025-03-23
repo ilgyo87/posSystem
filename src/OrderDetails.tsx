@@ -73,6 +73,7 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [qrCodesToPrint, setQrCodesToPrint] = useState<{qrCode: string, description: string}[]>([]);
   const [removedGarments, setRemovedGarments] = useState<string[]>([]);
+  const [removedItems, setRemovedItems] = useState<string[]>([]);
   
   // Reference to the barcode input field for auto-focusing
   const barcodeInputRef = useRef<TextInput>(null);
@@ -1286,36 +1287,179 @@ export default function OrderDetails({ route }: OrderDetailsScreenProps) {
             <View style={styles.orderItemsSection}>
               <View style={styles.sectionHeader}>
                 <Text style={styles.sectionTitle}>Order Items</Text>
-                <TouchableOpacity 
-                  style={styles.printAllButton}
-                  onPress={() => {
-                    // Get all non-removed garments
+                <View style={{flexDirection: 'row', gap: 10}}>
+                  <TouchableOpacity 
+                    style={[styles.printAllButton, {backgroundColor: '#FF9800'}]}
+                    onPress={() => setRemovedItems([])}
+                  >
+                    <Text style={styles.printAllButtonText}>Reset</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={styles.printAllButton}
+                    onPress={() => {
+                    // Get all non-removed garments and non-removed items
                     const garmentsToPrint = garments.filter(g => !removedGarments.includes(g.id));
-                    if (garmentsToPrint.length === 0) {
+                    
+                    // Get all items that haven't been removed via the X button
+                    const itemsToPrint = orderItems.flatMap(item => {
+                      const quantity = parseInt(item.quantity.toString()) || 1;
+                      const individualItems = [];
+                      
+                      for (let i = 0; i < quantity; i++) {
+                        const uniqueId = `${item.id}-${i}`;
+                        if (!removedItems.includes(uniqueId)) {
+                          individualItems.push({
+                            qrCode: uniqueId,
+                            description: item.name || 'No description'
+                          });
+                        }
+                      }
+                      
+                      return individualItems;
+                    });
+                    
+                    // Combine both garments and items
+                    const allQrCodes = [
+                      ...garmentsToPrint.map(g => ({
+                        qrCode: g.qrCode,
+                        description: g.description || 'No description'
+                      })),
+                      ...itemsToPrint
+                    ];
+                    
+                    if (allQrCodes.length === 0) {
                       Alert.alert('No Items', 'There are no items to print');
                       return;
                     }
                     
-                    // Format for printing
-                    const qrCodes = garmentsToPrint.map(g => ({
-                      qrCode: g.qrCode,
-                      description: g.description || 'No description'
-                    }));
-                    
-                    setQrCodesToPrint(qrCodes);
+                    setQrCodesToPrint(allQrCodes);
                     setShowPrintModal(true);
                   }}
                 >
-                  <Text style={styles.printAllButtonText}>Print All</Text>
-                </TouchableOpacity>
+                  <Text style={styles.printAllButtonText}>
+                    Print ({orderItems.reduce((total, item) => {
+                      const quantity = parseInt(item.quantity.toString()) || 1;
+                      let count = 0;
+                      for (let i = 0; i < quantity; i++) {
+                        const uniqueId = `${item.id}-${i}`;
+                        if (!removedItems.includes(uniqueId)) {
+                          count++;
+                        }
+                      }
+                      return total + count;
+                    }, 0)})
+                  </Text>
+                  </TouchableOpacity>
+                </View>
               </View>
+              {/* Display each product individually with color-coded service types */}
               <FlatList
-                data={garments}
-                renderItem={renderOrderItem}
-                keyExtractor={item => item.id}
+                data={(() => {
+                  // Define service colors - first 4 service types get predefined colors
+                  const predefinedColors = ['#FF0000', '#0000FF', '#FFA500', '#008000']; // Red, Blue, Orange, Green
+                  
+                  // Create a mapping of service types to colors
+                  const serviceColorMap: Record<string, string> = {};
+                  
+                  // First, collect all unique service IDs
+                  const uniqueServiceIDs: string[] = [];
+                  
+                  orderItems.forEach(item => {
+                    const serviceID = item.serviceID || '';
+                    if (serviceID && !uniqueServiceIDs.includes(serviceID)) {
+                      uniqueServiceIDs.push(serviceID);
+                    }
+                  });
+                  
+                  // Assign colors to service IDs
+                  uniqueServiceIDs.forEach((serviceID, index) => {
+                    if (index < predefinedColors.length) {
+                      // Use predefined colors for the first few service types
+                      serviceColorMap[serviceID] = predefinedColors[index];
+                    } else {
+                      // Generate a consistent color for additional service types
+                      let hash = 0;
+                      for (let i = 0; i < serviceID.length; i++) {
+                        hash = serviceID.charCodeAt(i) + ((hash << 5) - hash);
+                      }
+                      const h = Math.abs(hash) % 360;
+                      const s = 65 + (Math.abs(hash) % 20);
+                      const l = 45 + (Math.abs(hash) % 10);
+                      serviceColorMap[serviceID] = `hsl(${h}, ${s}%, ${l}%)`;
+                    }
+                  });
+                  
+                  // Create individual items with their service colors
+                  const items = [];
+                  for (const item of orderItems) {
+                    const serviceID = item.serviceID || '';
+                    const color = serviceColorMap[serviceID] || '#999999';
+                    const quantity = parseInt(item.quantity.toString()) || 1;
+                    
+                    // Create individual items for each quantity
+                    for (let i = 0; i < quantity; i++) {
+                      const uniqueId = `${item.id}-${i}`;
+                      // Only add items that haven't been removed
+                      if (!removedItems.includes(uniqueId)) {
+                        items.push({
+                          ...item,
+                          uniqueId: uniqueId,
+                          quantity: 1,
+                          serviceColor: color
+                        });
+                      }
+                    }
+                  }
+                  
+                  return items;
+                })()}
+                horizontal={false}
+                numColumns={1}
+                renderItem={({ item }) => {
+                  // Use the pre-assigned color for this item
+                  const color = (item as any).serviceColor || '#999999';
+                  console.log('DEBUG - Rendering item:', item.name, 'Color:', color);
+                  
+                  // Generate a unique QR code for each item
+                  const qrValue = (item as any).uniqueId || item.id;
+                  
+                  const uniqueId = (item as any).uniqueId || `${item.id}-0`;
+                  
+                  return (
+                    <View style={[styles.orderItemCard, { 
+                      borderColor: color, 
+                      borderWidth: 3
+                    }]}>
+                      <TouchableOpacity
+                        style={styles.removeItemButton}
+                        onPress={() => {
+                          // Add to the removed items list
+                          setRemovedItems([...removedItems, uniqueId]);
+                        }}
+                      >
+                        <Text style={styles.removeItemButtonText}>✕</Text>
+                      </TouchableOpacity>
+                      <View style={[styles.orderItemColorBar, { backgroundColor: color }]} />
+                      <View style={styles.orderItemContentWrapper}>
+                        <Text style={[styles.orderItemName, { color }]}>{item.name}</Text>
+                        <Text style={[styles.orderItemPrice, { color }]}>${item.price.toFixed(2)}</Text>
+                        <View style={styles.itemQrCodeContainer}>
+                          <QRCode
+                            value={qrValue}
+                            size={80}
+                            backgroundColor="white"
+                            color="black"
+                          />
+                        </View>
+                      </View>
+                    </View>
+                  );
+                }}
+                keyExtractor={item => item.uniqueId || item.id}
                 style={styles.orderItemsList}
+                contentContainerStyle={styles.orderItemsContainer}
                 ListEmptyComponent={
-                  <Text style={styles.emptyText}>No order items yet</Text>
+                  <Text style={styles.emptyText}>Loading order items...</Text>
                 }
               />
             </View>
@@ -1530,6 +1674,84 @@ const styles = StyleSheet.create<any>({
   orderItemsList: {
     flex: 1,
   },
+  orderItemsContainer: {
+    padding: 8,
+  },
+  orderItemCard: {
+    width: 406,
+    height: 203,
+    margin: 4,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 1.5,
+    elevation: 2,
+  },
+  orderItemColorBar: {
+    height: 10,
+    width: '100%',
+  },
+  orderItemContentWrapper: {
+    padding: 12,
+    alignItems: 'center',
+  },
+  removeItemButton: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#FF3B30',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  removeItemButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  orderItemName: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#333',
+    marginBottom: 6,
+  },
+  orderItemDetails: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  orderItemQuantity: {
+    fontSize: 14,
+    color: '#666',
+  },
+  orderItemPrice: {
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 8,
+  },
+  itemQrCodeContainer: {
+    marginTop: 8,
+    padding: 4,
+    backgroundColor: '#fff',
+    borderRadius: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  orderItemServiceType: {
+    fontSize: 12,
+    color: '#888',
+    marginTop: 6,
+    fontStyle: 'italic',
+  },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1739,19 +1961,7 @@ const styles = StyleSheet.create<any>({
     color: '#666',
     marginBottom: 8,
   },
-  removeItemButton: {
-    backgroundColor: '#f44336',
-    borderRadius: 12,
-    width: 24,
-    height: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  removeItemButtonText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
+
   qrCodeContainer: {
     alignItems: 'center',
     marginVertical: 8,

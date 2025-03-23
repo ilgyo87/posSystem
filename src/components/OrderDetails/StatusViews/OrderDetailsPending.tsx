@@ -31,6 +31,12 @@ const OrderDetailsPending: React.FC<OrderDetailsPendingProps> = ({
   handleEditGarment,
   handleDeleteGarment
 }) => {
+  // Debug order items
+  console.log('OrderDetailsPending - orderItems:', orderItems ? orderItems.length : 0, 'items');
+  console.log('OrderDetailsPending - totalGarments:', totalGarments);
+  if (orderItems && orderItems.length > 0) {
+    console.log('First order item:', JSON.stringify(orderItems[0]));
+  }
   return (
     <View style={{ flex: 1 }}>
       <ScrollView 
@@ -100,6 +106,22 @@ const OrderDetailsPending: React.FC<OrderDetailsPendingProps> = ({
           </View>
         )}
 
+        {/* Order Items Section - Always displayed without conditions */}
+        <Text style={styles.sectionTitle}>Order Items</Text>
+        <View style={{ backgroundColor: '#fff', marginBottom: 16, borderRadius: 8, overflow: 'hidden' }}>
+          {orderItems.map((item) => (
+            <View key={item.id} style={{ backgroundColor: '#fff', padding: 8, borderBottomWidth: 1, borderBottomColor: '#eee' }}>
+              <View style={{ flex: 1, padding: 12 }}>
+                <Text style={{ fontSize: 16, fontWeight: '500', color: '#333', marginBottom: 4 }}>{item.name}</Text>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+                  <Text style={{ fontSize: 14, color: '#666' }}>Qty: {item.quantity}</Text>
+                  <Text style={{ fontSize: 14, fontWeight: '500', color: '#2196F3' }}>${item.price.toFixed(2)}</Text>
+                </View>
+              </View>
+            </View>
+          ))}
+        </View>
+        
         {/* Services Section */}
         <Text style={styles.sectionTitle}>Services</Text>
         <View style={styles.servicesContainer}>
